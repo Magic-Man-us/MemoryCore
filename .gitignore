@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+*.whl
+
+# Testing / Coverage
+htmlcov/
+.coverage
+.coverage.*
+.pytest_cache/
+.mypy_cache/
+.tox/
+.nox/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Rust
+target/
+*.so
+*.dylib
+*.dll
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Environment / Secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Archives
+/archive/
+
+# Lock files (keep uv.lock, ignore others)
+Pipfile.lock
+poetry.lock

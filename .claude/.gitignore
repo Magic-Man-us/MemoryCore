@@ -1,0 +1,13 @@
+# Claude workspace files to ignore
+debug/
+todos/
+cache/
+*.log
+*.cache
+*.tmp
+
+# Analysis cache files (if stored at root level)
+workspace-analysis.json
+ports.json
+atlas.json
+workspace-atlas.json

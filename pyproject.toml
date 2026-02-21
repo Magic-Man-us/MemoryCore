@@ -1,0 +1,41 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "memory_core"
+version = "0.1.0"
+description = "Rust-based memory engine for AI, exposed to Python via PyO3"
+requires-python = ">=3.12"
+authors = [
+  { name = "Justin" }
+]
+license = { text = "MIT" }
+classifiers = [
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Rust",
+]
+dependencies = [
+    "numpy>=2.3.4",
+    "pydantic>=2.12.4",
+    "redis>=7.0.1",
+    "sqlalchemy>=2.0.44",
+    "mysql-connector-python>=9.4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "maturin>=1.10.1",
+    "pytest>=9.0.1",
+    "matplotlib>=3.10.7",
+]
+postgres = [
+    "psycopg[binary]>=3.2.0",
+]
+ai = [
+    "pydantic-ai>=0.8.1",
+]
+
+[tool.maturin]
+module-name = "memory_core"
