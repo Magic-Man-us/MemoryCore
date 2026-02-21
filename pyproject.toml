@@ -34,7 +34,7 @@ postgres = [
     "psycopg[binary]>=3.2.0",
 ]
 ai = [
-    "pydantic-ai>=0.8.1",
+    "pydantic-ai>=0.9",
 ]
 
 [tool.maturin]

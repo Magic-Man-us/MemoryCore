@@ -6,35 +6,45 @@ MemoryCore provides fast in-memory vector search (1-10ms queries) backed by a Ru
 
 ## Architecture
 
-```
-┌──────────────────────────────────────────────────┐
-│  MemorySystem                                    │
-│                                                  │
-│  ┌────────────────────┐  ┌────────────────────┐  │
-│  │  RustMemoryIndex   │  │  LongTermStore     │  │
-│  │  (Query Layer)     │  │  (Storage Layer)   │  │
-│  │                    │  │                    │  │
-│  │  - Vector search   │  │  - MariaDB/MySQL   │  │
-│  │  - 1-10ms queries  │  │  - Persistence     │  │
-│  │  - In-memory       │  │  - Crash recovery  │  │
-│  └────────────────────┘  └────────────────────┘  │
-│                                                  │
-│  ┌────────────────────┐  ┌────────────────────┐  │
-│  │  AssistantIndex    │  │  RedisWorkingMem   │  │
-│  │  (SMK Filtering)   │  │  (Session State)   │  │
-│  │                    │  │                    │  │
-│  │  - Structured keys │  │  - Short-lived     │  │
-│  │  - Topic/kind/tool │  │  - Per-session     │  │
-│  │  - Bitfield filter │  │  - TTL-based       │  │
-│  └────────────────────┘  └────────────────────┘  │
-└──────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph MemorySystem
+        direction TB
+        subgraph Query Layer
+            RI[RustMemoryIndex<br><i>Vector search, 1-10ms</i>]
+            AI[AssistantIndex<br><i>SMK bitfield filtering</i>]
+        end
+        subgraph Persistence Layer
+            LTM[LongTermStore<br><i>MariaDB / MySQL</i>]
+            STM[ShortTermStore<br><i>MariaDB / MySQL</i>]
+        end
+        WM[RedisWorkingMemory<br><i>Session state, TTL-based</i>]
+    end
 ```
 
-**Query path:** All queries hit RustMemoryIndex in RAM — no database roundtrips at runtime.
+### Data Flow
 
-**Write path:** Writes go to both the Rust index (immediate) and LongTermStore (async, for persistence).
+```mermaid
+flowchart LR
+    subgraph Startup
+        DB[(MariaDB)] -->|load all traces| Rust[RustMemoryIndex<br>in RAM]
+    end
+```
 
-**Startup path:** Memories load from LongTermStore into the Rust index once on boot.
+```mermaid
+flowchart LR
+    subgraph Query ["Query (fast path)"]
+        Q[User Query] --> R[RustMemoryIndex] --> Res[Results<br>1-10ms]
+    end
+```
+
+```mermaid
+flowchart LR
+    subgraph Write
+        M[New Memory] --> R2[RustMemoryIndex<br>immediate ~1ms]
+        M --> DB2[(LongTermStore<br>async, durable)]
+    end
+```
 
 ## Requirements
 

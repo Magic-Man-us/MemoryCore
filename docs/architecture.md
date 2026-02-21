@@ -4,49 +4,61 @@
 
 MemoryCore separates **query** from **storage**. All runtime queries hit the Rust-backed in-memory index (1-10ms). The database is only used for persistence and startup loading.
 
-```
-┌──────────────────────────────────────────────────┐
-│  MemorySystem                                    │
-│                                                  │
-│  ┌────────────────────┐  ┌────────────────────┐  │
-│  │  RustMemoryIndex   │  │  LongTermStore     │  │
-│  │  (Query Layer)     │  │  (Persistence)     │  │
-│  │                    │  │                    │  │
-│  │  All queries →     │  │  MariaDB/MySQL     │  │
-│  │  1-10ms, in RAM    │  │  SQLAlchemy ORM    │  │
-│  └────────────────────┘  └────────────────────┘  │
-│                                                  │
-│  ┌────────────────────┐  ┌────────────────────┐  │
-│  │  AssistantIndex    │  │  RedisWorkingMem   │  │
-│  │  (SMK Filtering)   │  │  (Session State)   │  │
-│  │                    │  │                    │  │
-│  │  Bitfield filter   │  │  TTL-based lists   │  │
-│  │  + cosine search   │  │  Per-user keys     │  │
-│  └────────────────────┘  └────────────────────┘  │
-└──────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph MemorySystem
+        direction TB
+        subgraph Query Layer
+            RI[RustMemoryIndex<br><i>All queries, 1-10ms, in RAM</i>]
+            AI[AssistantIndex<br><i>SMK bitfield filter + cosine search</i>]
+        end
+        subgraph Persistence Layer
+            LTM[LongTermStore<br><i>MariaDB/MySQL via SQLAlchemy ORM</i>]
+            STM[ShortTermStore<br><i>MariaDB/MySQL</i>]
+        end
+        WM[RedisWorkingMemory<br><i>TTL-based lists, per-user keys</i>]
+    end
 ```
 
 ## Data Flow
 
 ### Startup
 
-```
-LongTermStore (MariaDB) → load all traces → RustMemoryIndex (RAM)
+```mermaid
+flowchart LR
+    DB[(LongTermStore<br>MariaDB)] -->|load all traces| Rust[RustMemoryIndex<br>in RAM]
+    Rust --> Ready([Ready to serve queries])
 ```
 
 ### Query (fast path)
 
-```
-User query → RustMemoryIndex (RAM) → results in 1-10ms
+```mermaid
+flowchart LR
+    Q[User Query] --> Rust[RustMemoryIndex<br>in RAM]
+    Rust --> R[Results in 1-10ms]
+    style Rust fill:#2d6a4f,color:#fff
 ```
 
 The database is never hit during queries.
 
 ### Write
 
+```mermaid
+flowchart LR
+    M[New Memory] --> Rust[RustMemoryIndex<br>immediate ~1ms]
+    M --> DB[(LongTermStore<br>async, durable)]
+    M --> WM[(RedisWorkingMemory<br>session event)]
 ```
-New memory → RustMemoryIndex (immediate, ~1ms)
-           → LongTermStore (background, for durability)
+
+### SMK Query Pipeline
+
+```mermaid
+flowchart LR
+    QE[Query Embedding] --> BF{SMK Bitfield<br>Filter}
+    BF -->|candidates pass| CS[Cosine Similarity<br>Scoring]
+    CS --> TopK[Top-K Results]
+    BF -->|pruned| X[Discarded]
+    style BF fill:#8338ec,color:#fff
 ```
 
 ## Components
@@ -206,9 +218,11 @@ system = build_memory_system(overrides={
 
 Each user gets an isolated assistant with its own `RustMemoryIndex`. This gives natural memory isolation without multi-tenant filtering.
 
-```
-User Alice → Assistant A → RustMemoryIndex (Alice's memories only)
-User Bob   → Assistant B → RustMemoryIndex (Bob's memories only)
+```mermaid
+flowchart LR
+    A[Alice] --> AA[Assistant A] --> RA[RustMemoryIndex<br>Alice's memories]
+    B[Bob] --> AB[Assistant B] --> RB[RustMemoryIndex<br>Bob's memories]
+    C[Carol] --> AC[Assistant C] --> RC[RustMemoryIndex<br>Carol's memories]
 ```
 
 ### With database persistence
