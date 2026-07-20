@@ -72,8 +72,8 @@ def build_memory_system(
     db_settings = base_settings.db
     db_overrides = overrides.get("db")
     if db_overrides:
-        db_settings = db_settings.model_copy(update=dict(db_overrides))
-
+        cleaned = {k: v for k, v in dict(db_overrides).items() if v is not None}
+        db_settings = DatabaseSettings(**{**db_settings.model_dump(), **cleaned})
     wm_ttl_seconds = overrides.get("wm_ttl_seconds", base_settings.wm_ttl_seconds)
     wm_max_events = overrides.get("wm_max_events", base_settings.wm_max_events)
     stm_ttl_seconds = overrides.get("stm_ttl_seconds", base_settings.stm_ttl_seconds)
