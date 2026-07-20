@@ -14,11 +14,14 @@ license = { text = "MIT" }
 classifiers = [
   "Programming Language :: Python",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Programming Language :: Rust",
 ]
 dependencies = [
     "numpy>=2.3.4",
     "pydantic>=2.12.4",
+    "pydantic-settings>=2.6",
     "redis>=7.0.1",
     "sqlalchemy>=2.0.44",
     "mysql-connector-python>=9.4.0",
@@ -28,6 +31,7 @@ dependencies = [
 dev = [
     "maturin>=1.10.1",
     "pytest>=9.0.1",
+    "pytest-asyncio>=0.24",
     "matplotlib>=3.10.7",
 ]
 postgres = [
@@ -39,3 +43,9 @@ ai = [
 
 [tool.maturin]
 module-name = "memory_core"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

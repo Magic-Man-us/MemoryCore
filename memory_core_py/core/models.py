@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-if TYPE_CHECKING:
-    from memory_core_py.types.smk_types import MemoryKind, ToolFlag, TopicBucket
+# NOTE: runtime imports on purpose — these enums are pydantic *field types* on
+# AssistantMemoryTrace, so hiding them behind TYPE_CHECKING leaves the model
+# permanently "not fully defined" and unusable at runtime.
+from memory_core_py.types.smk_types import MemoryKind, ToolFlag, TopicBucket  # noqa: TC001
 
 class AssistantMemoryTrace(BaseModel):
     """Normalized record describing a single assistant-focused learning trace."""
