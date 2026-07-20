@@ -71,6 +71,41 @@ class TestLongTermStore:
         [(trace, _)] = store.fetch_traces_for_user("alice")
         assert trace.extra == {"source": "slack", "session": "s-1"}
 
+    def test_extra_with_non_json_native_values(self, db):
+        """A datetime in extra must serialize like STM does (mode='json'), not TypeError."""
+        stamp = datetime(2026, 7, 2, 3, 4, 5, tzinfo=UTC)
+        store = LongTermStore(db)
+        store.upsert_trace(_trace("u4", extra={"at": stamp}), embedding=[0.1])
+        [(trace, _)] = store.fetch_traces_for_user("alice")
+        assert trace.extra == {"at": "2026-07-02T03:04:05Z"}
+
+    def test_schema_upgrade_adds_extra_column(self, tmp_path):
+        """A database created before the extra column existed keeps working."""
+        from sqlalchemy import create_engine, text
+
+        from memory_core.storage import Database, DatabaseSettings
+
+        url = f"sqlite:///{tmp_path}/old.db"
+        old_engine = create_engine(url)
+        with old_engine.begin() as connection:
+            connection.execute(
+                text(
+                    "CREATE TABLE ltm_traces ("
+                    "trace_uid VARCHAR PRIMARY KEY, user_id VARCHAR NOT NULL, "
+                    "content TEXT, summary TEXT NOT NULL, importance FLOAT NOT NULL, "
+                    "created_at DATETIME NOT NULL, access_count INTEGER NOT NULL, "
+                    "tags TEXT, embedding BLOB)"
+                )
+            )
+        old_engine.dispose()
+
+        upgraded = Database(settings=DatabaseSettings(url=url))
+        upgraded.create_schema()  # must ALTER in the missing extra column
+        store = LongTermStore(upgraded)
+        store.upsert_trace(_trace("u5", extra={"source": "cli"}), embedding=[0.2])
+        [(trace, _)] = store.fetch_traces_for_user("alice")
+        assert trace.extra == {"source": "cli"}
+
 
 class TestShortTermStore:
     def test_insert_and_fetch_non_expired(self, db):

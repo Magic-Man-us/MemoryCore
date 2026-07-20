@@ -35,6 +35,10 @@ class LongTermStore:
         if embedding is not None:
             emb_bytes = json.dumps(list(embedding)).encode("utf-8")
 
+        # mode="json" coerces non-native values (datetimes, paths, …) the same way
+        # the STM store does, so one trace serializes identically in both stores.
+        extra_json = trace.model_dump(mode="json", include={"extra"})["extra"]
+
         row = LongTermTraceORM(
             trace_uid=trace.trace_uid,
             user_id=trace.user_id,
@@ -44,7 +48,7 @@ class LongTermStore:
             created_at=trace.created_at,
             access_count=trace.access_count,
             tags=json.dumps(sorted(trace.tags)),
-            extra=json.dumps(trace.extra) if trace.extra else None,
+            extra=json.dumps(extra_json) if extra_json else None,
             embedding=emb_bytes,
         )
         session = self._db.session()

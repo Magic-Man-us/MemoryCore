@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import datetime  # noqa: TC003 — runtime-required by Mapped[] resolution
 from typing import Any
 
-from sqlalchemy import LargeBinary, Text, create_engine, event
+from sqlalchemy import LargeBinary, Text, create_engine, event, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
@@ -85,8 +85,10 @@ class Database:
         engine_kwargs: dict[str, Any] = {}
         if self.settings.url.startswith("sqlite"):
             # Store calls run in worker threads (asyncio.to_thread); WAL keeps
-            # concurrent reader/writer turns from blocking each other.
-            engine_kwargs["connect_args"] = {"check_same_thread": False}
+            # concurrent reader/writer turns from blocking each other, and the
+            # busy timeout lets multiple processes (a CLI and a daemon on one
+            # file) wait out each other's write locks instead of erroring.
+            engine_kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30}
         self.engine: Engine = create_engine(self.settings.url, **engine_kwargs)
         if self.settings.url.startswith("sqlite"):
             event.listen(self.engine, "connect", _sqlite_wal_pragma)
@@ -94,9 +96,28 @@ class Database:
             bind=self.engine, expire_on_commit=False
         )
 
+    # Additive columns introduced after a table first shipped, applied by
+    # create_schema so existing databases keep working without a migration
+    # framework: (table, column, DDL type). ALTER TABLE ... ADD COLUMN is
+    # portable across SQLite/PostgreSQL/MySQL for nullable columns.
+    _MICRO_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
+        ("ltm_traces", "extra", "TEXT"),
+    )
+
     def create_schema(self) -> None:
-        """Create all tables if missing. Idempotent."""
+        """Create missing tables and add later-introduced columns. Idempotent."""
         Base.metadata.create_all(self.engine)
+        inspector = inspect(self.engine)
+        tables = set(inspector.get_table_names())
+        for table, column, ddl_type in self._MICRO_MIGRATIONS:
+            if table not in tables:
+                continue
+            existing = {col["name"] for col in inspector.get_columns(table)}
+            if column not in existing:
+                with self.engine.begin() as connection:
+                    connection.execute(
+                        text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}")
+                    )
 
     def session(self) -> Session:
         """A new session; callers own commit/close."""
