@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 from .smk_types import Level2Bits, MemoryKind, TopicBucket
 
 if TYPE_CHECKING:
-    from memory_core_py.core.models import AssistantMemoryTrace
+    from memory_core.core.models import AssistantMemoryTrace
 
 # Quantization thresholds
 LOW_THRESHOLD: float = 0.25

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from conftest import make_assistant_trace
-from memory_core_py.types.smk_features import _quantize_level, build_smk_features
-from memory_core_py.types.smk_types import Level2Bits, MemoryKind, ToolFlag, TopicBucket
+from tests.conftest import make_assistant_trace
+from memory_core.types.smk_features import _quantize_level, build_smk_features
+from memory_core.types.smk_types import Level2Bits, MemoryKind, ToolFlag, TopicBucket
 
 
 class TestQuantization:

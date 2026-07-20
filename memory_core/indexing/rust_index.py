@@ -1,10 +1,12 @@
+"""Thin wrapper over the Rust engine (``memory_core._native``)."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from memory_core import PyMemoryCandidate, PyMemoryEngine
-from memory_core_py.core.models import MemoryCandidate, MemoryTrace
+from memory_core._native import PyMemoryCandidate, PyMemoryEngine
+from memory_core.core.models import MemoryCandidate, MemoryTrace
 
 if TYPE_CHECKING:
     from collections.abc import Iterable

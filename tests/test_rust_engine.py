@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-pytest.importorskip("memory_core", reason="Rust extension not built (run: uv sync)")
+pytest.importorskip("memory_core._native", reason="Rust extension not built (run: maturin develop)")
 
-from conftest import make_assistant_trace, make_trace  # noqa: E402
-from memory_core_py.indexing.assistant_index import AssistantMemoryIndex  # noqa: E402
-from memory_core_py.indexing.rust_index import RustMemoryIndex  # noqa: E402
-from memory_core_py.types.smk_types import (  # noqa: E402
+from tests.conftest import make_assistant_trace, make_trace  # noqa: E402
+from memory_core.indexing.assistant_index import AssistantMemoryIndex  # noqa: E402
+from memory_core.indexing.rust_index import RustMemoryIndex  # noqa: E402
+from memory_core.types.smk_types import (  # noqa: E402
     MemoryKind,
     ToolFlag,
     TopicBucket,

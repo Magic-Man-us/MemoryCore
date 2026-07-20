@@ -1,18 +1,29 @@
-# memory_core_py/assistant_index.py
+"""Wrapper around the Rust SMK assistant index (``memory_core._native``)."""
+
 from __future__ import annotations
 
+import hashlib
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from memory_core import PyAssistantMemoryIndex, PySmkQuery  # Rust bindings
-from memory_core_py.types.smk_features import build_smk_features
+from memory_core._native import PyAssistantMemoryIndex, PySmkQuery
+from memory_core.types.smk_features import build_smk_features
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from memory_core_py.core.models import AssistantMemoryTrace
-    from memory_core_py.types.smk_types import Level2Bits, MemoryKind, ToolFlag, TopicBucket
+    from memory_core.core.models import AssistantMemoryTrace
+    from memory_core.types.smk_types import Level2Bits, MemoryKind, ToolFlag, TopicBucket
+
+
+def stable_memory_id(trace_uid: str) -> int:
+    """A deterministic 64-bit id for a trace uid.
+
+    ``hash(str)`` is salted per process (PYTHONHASHSEED), which would orphan every
+    id on restart; a digest is stable across processes and machines.
+    """
+    return int.from_bytes(hashlib.blake2b(trace_uid.encode(), digest_size=8).digest(), "big")
 
 
 class AssistantMemoryHit(BaseModel):
@@ -28,14 +39,13 @@ class AssistantMemoryIndex:
 
     def __init__(self, dim: int) -> None:
         self._inner = PyAssistantMemoryIndex(dim)
-        # you may also want a mapping id -> trace_uid if you care
         self._id_to_uid: dict[int, str] = {}
 
     def ingest(self, trace: AssistantMemoryTrace, embedding: Iterable[float]) -> None:
         smk = build_smk_features(trace)
         emb = list(embedding)
 
-        mem_id = int(hash(trace.trace_uid) & 0xFFFFFFFFFFFFFFFF)
+        mem_id = stable_memory_id(trace.trace_uid)
         self._id_to_uid[mem_id] = trace.trace_uid
 
         self._inner.add(
@@ -67,7 +77,7 @@ class AssistantMemoryIndex:
 
         kinds_raw = None
         if allowed_kinds:
-            kinds_raw = [int(k.value) for k in allowed_kinds]
+            kinds_raw = [int(kind.value) for kind in allowed_kinds]
 
         smk_q = PySmkQuery(
             topic=int(topic.value) if topic is not None else None,

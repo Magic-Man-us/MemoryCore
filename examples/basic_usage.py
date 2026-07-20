@@ -1,71 +1,46 @@
-"""Basic usage example for the memory_core package.
+"""Basic usage: a SQLite-backed memory system, no services required.
 
-This example demonstrates how to set up and use the MemorySystem
-for basic user memory operations.
+Run:
+    python examples/basic_usage.py
 """
 
 import asyncio
 
-from memory_core_py import (
-    LongTermStore,
-    MemorySystem,
-    RedisWorkingMemory,
-    RustMemoryIndex,
-)
+from memory_core import build_memory_system
 
 
-async def main():
-    """Demonstrate basic memory system usage."""
-    # Initialize storage components
-    ltm_store = LongTermStore(
-        host="localhost",
-        user="memory_user",
-        password="secure_password",
-        database="memory_db",
-    )
+async def main() -> None:
+    # One SQLite file holds LTM, STM, and working memory; tables are created
+    # automatically. Point MEMORY_DB_URL (or overrides) at PostgreSQL later if
+    # you outgrow a file.
+    system = build_memory_system(overrides={"db": {"url": "sqlite:///example_memory.db"}})
 
-    working_mem = RedisWorkingMemory(
-        url="redis://localhost:6379/0",
-        ttl_seconds=900,
-    )
-
-    # Initialize vector index
-    memory_index = RustMemoryIndex()
-
-    # Create the memory system
-    memory_system = MemorySystem(
-        memory_index=memory_index,
-        working_mem=working_mem,
-        ltm_store=ltm_store,
-    )
-
-    # Example: Store a memory
     user_id = "user_123"
-    embedding = [0.1, 0.2, 0.3] * 128  # 384-dim example
+    embedding = [0.1, 0.2, 0.3] * 128  # 384-dim example; supply your model's vectors,
+    # or construct the system with an `Embedder` and skip embeddings entirely.
 
-    trace = await memory_system.remember(
+    trace = await system.remember(
         user_id=user_id,
         summary="User prefers dark mode UI",
+        content="Said 'always use dark mode' while configuring the editor",
         importance=0.8,
         tags=["preference", "ui"],
         embedding=embedding,
-        also_working_mem=True,
     )
     print(f"Stored memory: {trace.trace_uid}")
 
-    # Example: Recall memories
-    query_embedding = [0.1, 0.2, 0.3] * 128
-    results = await memory_system.recall(
+    result = await system.recall(
         user_id=user_id,
         query_text="UI preferences",
-        tags=["preference"],
         limit=10,
-        query_embedding=query_embedding,
-        include_working_mem=True,
+        query_embedding=embedding,
     )
+    print(f"Found {len(result.ltm_candidates)} LTM candidates")
+    print(f"Found {len(result.wm_events)} working memory events")
 
-    print(f"Found {len(results['ltm_candidates'])} LTM candidates")
-    print(f"Found {len(results['wm_events'])} working memory events")
+    # After a restart, repopulate the in-RAM index from the database:
+    restored = await system.hydrate(user_id)
+    print(f"Hydrated {restored} traces from LTM")
 
 
 if __name__ == "__main__":

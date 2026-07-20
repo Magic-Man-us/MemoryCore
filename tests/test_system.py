@@ -1,118 +1,148 @@
-"""MemorySystem orchestration across index, stores, and working memory."""
+"""End-to-end MemorySystem tests: real Rust index, real temp SQLite, fake embedder."""
 
 from __future__ import annotations
 
-from datetime import timedelta
+import pytest
 
-from conftest import make_assistant_trace
-from memory_core_py.core.system import MemorySystem
+from memory_core import MemorySystem, RustMemoryIndex
+from memory_core.storage import LongTermStore, ShortTermStore, SqlWorkingMemory
 
 
-def build_system(fake_index, fake_wm, fake_ltm, fake_stm=None, *, ttl=300) -> MemorySystem:
+@pytest.fixture
+def system(db, embedder) -> MemorySystem:
     return MemorySystem(
-        memory_index=fake_index,
-        working_mem=fake_wm,
-        ltm_store=fake_ltm,
-        stm_store=fake_stm,
-        stm_ttl_seconds=ttl,
+        memory_index=RustMemoryIndex(),
+        working_mem=SqlWorkingMemory(db, ttl_seconds=60),
+        ltm_store=LongTermStore(db),
+        embedder=embedder,
+        stm_store=ShortTermStore(db),
+        stm_ttl_seconds=60,
     )
 
 
-EMBEDDING = [0.1, 0.2, 0.3]
+async def test_remember_recall_roundtrip(system):
+    trace = await system.remember(
+        user_id="alice",
+        summary="prefers uv over pip",
+        content="alice said: always use uv",
+        importance=0.9,
+        tags=["preference", "python"],
+    )
+    assert trace.trace_uid
+
+    result = await system.recall(user_id="alice", query_text="uv pip preference", limit=5)
+    assert [c.trace_uid for c in result.ltm_candidates] == [trace.trace_uid]
+    # the remember() call also left a working-memory event
+    assert any(e.get("kind") == "ltm_trace" for e in result.wm_events)
+    # and an STM trace
+    assert [t.trace_uid for t in result.stm_traces] == [trace.trace_uid]
 
 
-class TestRemember:
-    async def test_persists_across_all_layers(self, fake_index, fake_wm, fake_ltm, fake_stm):
-        system = build_system(fake_index, fake_wm, fake_ltm, fake_stm, ttl=120)
-        trace = await system.remember(
-            user_id="u-1",
-            content="full text",
-            summary="short",
-            importance=0.7,
-            tags=["a", "b"],
-            embedding=EMBEDDING,
-        )
-
-        assert trace.user_id == "u-1"
-        assert trace.tags == {"a", "b"}
-        assert trace.trace_uid  # generated
-
-        # STM got the trace with created_at + ttl expiry.
-        (stm_trace, expires_at), = fake_stm.inserts
-        assert stm_trace.trace_uid == trace.trace_uid
-        assert expires_at == trace.created_at + timedelta(seconds=120)
-
-        # LTM and the vector index both received the embedding.
-        (ltm_trace, ltm_emb), = fake_ltm.upserts
-        assert ltm_trace.trace_uid == trace.trace_uid
-        assert ltm_emb == EMBEDDING
-        (idx_trace, idx_emb), = fake_index.ingested
-        assert idx_trace.trace_uid == trace.trace_uid
-        assert idx_emb == EMBEDDING
-
-        # Working memory got an event describing the trace.
-        (wm_user, payload), = fake_wm.events
-        assert wm_user == "u-1"
-        assert payload["kind"] == "ltm_trace"
-        assert payload["trace_uid"] == trace.trace_uid
-
-    async def test_working_memory_can_be_skipped(self, fake_index, fake_wm, fake_ltm):
-        system = build_system(fake_index, fake_wm, fake_ltm)
-        await system.remember(
-            user_id="u-1",
-            summary="short",
-            importance=0.7,
-            tags=[],
-            embedding=EMBEDDING,
-            also_working_mem=False,
-        )
-        assert fake_wm.events == []
-
-    async def test_stm_is_optional(self, fake_index, fake_wm, fake_ltm):
-        system = build_system(fake_index, fake_wm, fake_ltm, fake_stm=None)
-        await system.remember(
-            user_id="u-1", summary="s", importance=0.5, tags=[], embedding=EMBEDDING
-        )
-        assert len(fake_ltm.upserts) == 1  # no crash without STM
+async def test_working_memory_can_be_skipped_on_remember(system):
+    await system.remember(
+        user_id="alice",
+        summary="quiet write",
+        importance=0.5,
+        tags=[],
+        also_working_mem=False,
+    )
+    result = await system.recall(user_id="alice", query_text="quiet write", limit=5)
+    assert result.wm_events == []
 
 
-class TestRecall:
-    async def test_aggregates_all_layers(self, fake_index, fake_wm, fake_ltm, fake_stm):
-        from conftest import make_trace
-
-        fake_wm.recent = [{"kind": "ltm_trace", "summary": "recent"}]
-        fake_stm.recent = [make_trace(trace_uid="stm-1")]
-        system = build_system(fake_index, fake_wm, fake_ltm, fake_stm)
-
-        result = await system.recall(
-            user_id="u-1",
-            query_text="anything",
-            tags=["a"],
-            limit=5,
-            query_embedding=EMBEDDING,
-        )
-
-        assert result["ltm_candidates"] == []
-        assert result["wm_events"] == fake_wm.recent
-        assert [t.trace_uid for t in result["stm_traces"]] == ["stm-1"]
-        assert fake_index.searches == [
-            {"user_id": "u-1", "text": "anything", "tags": ["a"], "limit": 5}
-        ]
-
-    async def test_working_memory_can_be_excluded(self, fake_index, fake_wm, fake_ltm):
-        fake_wm.recent = [{"kind": "x"}]
-        system = build_system(fake_index, fake_wm, fake_ltm)
-        result = await system.recall(
-            user_id="u-1", query_text="", tags=[], limit=3,
-            query_embedding=EMBEDDING, include_working_mem=False,
-        )
-        assert result["wm_events"] == []
-        assert result["stm_traces"] == []  # stm disabled
+async def test_working_memory_can_be_excluded_on_recall(system):
+    await system.remember(user_id="alice", summary="noisy write", importance=0.5, tags=[])
+    result = await system.recall(
+        user_id="alice", query_text="noisy write", limit=5, include_working_mem=False
+    )
+    assert result.wm_events == []
+    assert len(result.ltm_candidates) == 1
 
 
-class TestAssistantPaths:
-    async def test_noop_without_assistant_index(self, fake_index, fake_wm, fake_ltm):
-        system = build_system(fake_index, fake_wm, fake_ltm)
-        await system.remember_assistant(trace=make_assistant_trace(), embedding=EMBEDDING)
-        hits = await system.recall_assistant(query_embedding=EMBEDDING, k=3)
-        assert hits == []
+async def test_recall_requires_embedder_or_embedding(db):
+    system = MemorySystem(
+        memory_index=RustMemoryIndex(),
+        working_mem=SqlWorkingMemory(db),
+        ltm_store=LongTermStore(db),
+    )
+    with pytest.raises(ValueError, match="no Embedder configured"):
+        await system.recall(user_id="alice", query_text="anything", limit=5)
+
+
+async def test_explicit_embedding_still_works(db):
+    system = MemorySystem(
+        memory_index=RustMemoryIndex(),
+        working_mem=SqlWorkingMemory(db),
+        ltm_store=LongTermStore(db),
+    )
+    await system.remember(
+        user_id="alice",
+        summary="s",
+        importance=0.5,
+        tags=[],
+        embedding=[0.1, 0.2, 0.3],
+    )
+    result = await system.recall(
+        user_id="alice", query_text="s", limit=5, query_embedding=[0.1, 0.2, 0.3]
+    )
+    assert len(result.ltm_candidates) == 1
+
+
+async def test_stm_is_optional(db, embedder):
+    system = MemorySystem(
+        memory_index=RustMemoryIndex(),
+        working_mem=SqlWorkingMemory(db),
+        ltm_store=LongTermStore(db),
+        embedder=embedder,
+    )
+    await system.remember(user_id="alice", summary="no stm", importance=0.5, tags=[])
+    result = await system.recall(user_id="alice", query_text="no stm", limit=5)
+    assert result.stm_traces == []
+    assert len(result.ltm_candidates) == 1
+
+
+async def test_hydrate_restores_index_from_ltm(db, embedder):
+    first = MemorySystem(
+        memory_index=RustMemoryIndex(),
+        working_mem=SqlWorkingMemory(db),
+        ltm_store=LongTermStore(db),
+        embedder=embedder,
+    )
+    kept = await first.remember(
+        user_id="alice", summary="likes rust", importance=0.8, tags=["lang"]
+    )
+
+    # simulate a restart: fresh index, same database
+    second = MemorySystem(
+        memory_index=RustMemoryIndex(),
+        working_mem=SqlWorkingMemory(db),
+        ltm_store=LongTermStore(db),
+        embedder=embedder,
+    )
+    loaded = await second.hydrate("alice")
+    assert loaded == 1
+    result = await second.recall(user_id="alice", query_text="likes rust", limit=5)
+    assert [c.trace_uid for c in result.ltm_candidates] == [kept.trace_uid]
+
+
+async def test_forget_removes_everywhere(system):
+    trace = await system.remember(
+        user_id="alice", summary="temporary fact", importance=0.5, tags=[]
+    )
+    assert await system.forget(trace.trace_uid) is True
+    result = await system.recall(user_id="alice", query_text="temporary fact", limit=5)
+    assert result.ltm_candidates == []
+    # and it is gone from LTM, so a rehydrate cannot resurrect it
+    fresh = MemorySystem(
+        memory_index=RustMemoryIndex(),
+        working_mem=system.working_mem,
+        ltm_store=system.ltm_store,
+        embedder=system.embedder,
+    )
+    assert await fresh.hydrate("alice") == 0
+
+
+async def test_record_event(system):
+    await system.record_event(user_id="alice", payload={"kind": "turn", "text": "hi"})
+    result = await system.recall(user_id="alice", query_text="hi", limit=5)
+    assert any(e.get("kind") == "turn" for e in result.wm_events)

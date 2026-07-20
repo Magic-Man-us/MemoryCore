@@ -4,8 +4,8 @@ build-backend = "maturin"
 
 [project]
 name = "memory_core"
-version = "0.1.0"
-description = "Rust-based memory engine for AI, exposed to Python via PyO3"
+version = "0.2.0"
+description = "Rust-backed memory engine for AI assistants: SQL persistence, in-RAM vector search"
 requires-python = ">=3.12"
 authors = [
   { name = "Justin" }
@@ -19,12 +19,9 @@ classifiers = [
   "Programming Language :: Rust",
 ]
 dependencies = [
-    "numpy>=2.3.4",
     "pydantic>=2.12.4",
     "pydantic-settings>=2.6",
-    "redis>=7.0.1",
     "sqlalchemy>=2.0.44",
-    "mysql-connector-python>=9.4.0",
 ]
 
 [project.optional-dependencies]
@@ -32,7 +29,6 @@ dev = [
     "maturin>=1.10.1",
     "pytest>=9.0.1",
     "pytest-asyncio>=0.24",
-    "matplotlib>=3.10.7",
 ]
 postgres = [
     "psycopg[binary]>=3.2.0",
@@ -42,10 +38,20 @@ ai = [
 ]
 
 [tool.maturin]
-module-name = "memory_core"
+# Mixed Rust/Python layout: the `memory_core/` package at the repo root is the
+# Python layer; the compiled extension is mounted inside it as `memory_core._native`.
+module-name = "memory_core._native"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff.lint.flake8-type-checking]
+# Pydantic and SQLAlchemy evaluate annotations at runtime; never let the TC rules
+# move their imports behind TYPE_CHECKING (see docs/review-junovera-integration.md).
+runtime-evaluated-base-classes = [
+    "pydantic.BaseModel",
+    "pydantic_settings.BaseSettings",
+    "sqlalchemy.orm.DeclarativeBase",
+]
