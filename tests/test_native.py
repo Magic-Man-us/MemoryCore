@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from memory_core import (
     AssistantMemoryIndex,
     AssistantMemoryTrace,
@@ -40,6 +42,29 @@ def test_engine_user_isolation_at_scoring():
         )
         == []
     )
+
+
+def test_engine_keyword_flood_does_not_suppress_fallback():
+    """Review P1-6: another user's keyword matches must not collapse recall to zero."""
+    engine = PyMemoryEngine()
+    for i in range(5):
+        engine.ingest_trace(f"b{i}", "bob", f"python tip {i}", 0.5, 1 + i, 0, [], emb(i + 10))
+    engine.ingest_trace("a1", "alice", "prefers snake case", 0.9, 100, 0, [], emb(2))
+    engine.ingest_trace("a2", "alice", "dislikes long meetings", 0.8, 101, 0, [], emb(4))
+
+    hits = engine.search_candidates(
+        user_id="alice", text="python", tags=[], limit=3, query_embedding=emb(2)
+    )
+    assert sorted(c.trace_uid for c in hits) == ["a1", "a2"]
+
+
+def test_engine_query_dim_mismatch_raises_value_error():
+    engine = PyMemoryEngine()
+    engine.ingest_trace("a1", "alice", "s", 0.5, 1, 0, [], emb(1))
+    with pytest.raises(ValueError, match="dimension mismatch"):
+        engine.search_candidates(
+            user_id="alice", text="", tags=[], limit=5, query_embedding=[0.1, 0.2]
+        )
 
 
 def test_smk_roundtrip_via_wrapper():
@@ -81,3 +106,40 @@ def test_stable_memory_id_is_deterministic():
     assert stable_memory_id("trace-x") == stable_memory_id("trace-x")
     assert stable_memory_id("trace-x") != stable_memory_id("trace-y")
     assert stable_memory_id("trace-x") < 2**64
+
+
+def test_smk_unknown_enum_discriminants_raise_value_error():
+    """Review P1-9: bad discriminants are rejected, not silently coerced."""
+    from memory_core._native import PyAssistantMemoryIndex, PySmkQuery
+
+    index = PyAssistantMemoryIndex(DIM)
+    with pytest.raises(ValueError, match="invalid topic"):
+        index.add(
+            id=1, topic=99, kind=1, tool_mask=0, difficulty=0, generality=0,
+            importance=0, embedding=emb(1),
+        )
+    with pytest.raises(ValueError, match="invalid kind"):
+        index.add(
+            id=1, topic=1, kind=42, tool_mask=0, difficulty=0, generality=0,
+            importance=0, embedding=emb(1),
+        )
+    with pytest.raises(ValueError, match="invalid topic"):
+        PySmkQuery(topic=99)
+
+
+def test_smk_dim_mismatch_raises_value_error_not_panic():
+    """Review P1-8: dimension mismatches surface as ValueError, not PanicException."""
+    from memory_core._native import PyAssistantMemoryIndex, PySmkQuery
+
+    index = PyAssistantMemoryIndex(DIM)
+    index.add(
+        id=1, topic=1, kind=1, tool_mask=0, difficulty=0, generality=0,
+        importance=0, embedding=emb(1),
+    )
+    with pytest.raises(ValueError, match="dimension mismatch"):
+        index.add(
+            id=2, topic=1, kind=1, tool_mask=0, difficulty=0, generality=0,
+            importance=0, embedding=[0.1, 0.2],
+        )
+    with pytest.raises(ValueError, match="dimension mismatch"):
+        index.query_top_k_filtered([0.1, 0.2], 5, PySmkQuery())

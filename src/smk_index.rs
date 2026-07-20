@@ -13,6 +13,20 @@ pub enum TopicBucket {
     DbSchema = 4,
 }
 
+impl TryFrom<u8> for TopicBucket {
+    type Error = String;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(TopicBucket::RustPythonToolchain),
+            2 => Ok(TopicBucket::MemoryArchitecture),
+            3 => Ok(TopicBucket::AwsIam),
+            4 => Ok(TopicBucket::DbSchema),
+            other => Err(format!("invalid topic discriminant: {other} (expected 1..=4)")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum MemoryKind {
@@ -23,6 +37,21 @@ pub enum MemoryKind {
     Workflow = 4,
 }
 
+impl TryFrom<u8> for MemoryKind {
+    type Error = String;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(MemoryKind::Insight),
+            1 => Ok(MemoryKind::Pattern),
+            2 => Ok(MemoryKind::AntiPattern),
+            3 => Ok(MemoryKind::Principle),
+            4 => Ok(MemoryKind::Workflow),
+            other => Err(format!("invalid kind discriminant: {other} (expected 0..=4)")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
 pub enum Level2Bits {
@@ -30,6 +59,20 @@ pub enum Level2Bits {
     Medium = 1,
     High = 2,
     Extreme = 3,
+}
+
+impl TryFrom<u8> for Level2Bits {
+    type Error = String;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Level2Bits::Low),
+            1 => Ok(Level2Bits::Medium),
+            2 => Ok(Level2Bits::High),
+            3 => Ok(Level2Bits::Extreme),
+            other => Err(format!("invalid level discriminant: {other} (expected 0..=3)")),
+        }
+    }
 }
 
 // Tool bitflags (16 bits max).
@@ -249,9 +292,16 @@ impl RustMemoryIndex {
         Self { dim, memories: Vec::new() }
     }
 
-    pub fn add(&mut self, mem: MemoryTrace) {
-        assert_eq!(mem.embedding.len(), self.dim);
+    pub fn add(&mut self, mem: MemoryTrace) -> Result<(), String> {
+        if mem.embedding.len() != self.dim {
+            return Err(format!(
+                "embedding dimension mismatch: expected {}, got {}",
+                self.dim,
+                mem.embedding.len()
+            ));
+        }
         self.memories.push(mem);
+        Ok(())
     }
 
     fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
@@ -276,8 +326,14 @@ impl RustMemoryIndex {
         query: &[f32],
         k: usize,
         smk_query: &SmkQuery,
-    ) -> Vec<(u64, f32, StructuredMemoryKey)> {
-        assert_eq!(query.len(), self.dim);
+    ) -> Result<Vec<(u64, f32, StructuredMemoryKey)>, String> {
+        if query.len() != self.dim {
+            return Err(format!(
+                "query dimension mismatch: expected {}, got {}",
+                self.dim,
+                query.len()
+            ));
+        }
 
         let mut scores: Vec<(u64, f32, StructuredMemoryKey)> = self
             .memories
@@ -289,8 +345,9 @@ impl RustMemoryIndex {
             })
             .collect();
 
-        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        // NaN-safe: a non-finite score (a NaN in any embedding) must not panic the sort.
+        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         scores.truncate(k);
-        scores
+        Ok(scores)
     }
 }
