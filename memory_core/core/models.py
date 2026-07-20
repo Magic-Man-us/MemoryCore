@@ -1,13 +1,20 @@
-# memory_core_py/models.py
+"""Pydantic contracts for traces, candidates, and recall results.
+
+The SMK enums are imported at runtime on purpose: Pydantic evaluates field
+annotations when the model class is built, so moving these under TYPE_CHECKING
+leaves ``AssistantMemoryTrace`` permanently "not fully defined"
+(see docs/review-junovera-integration.md, P0-2).
+"""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-if TYPE_CHECKING:
-    from memory_core_py.types.smk_types import MemoryKind, ToolFlag, TopicBucket
+from memory_core.types.smk_types import MemoryKind, ToolFlag, TopicBucket
+
 
 class AssistantMemoryTrace(BaseModel):
     """Normalized record describing a single assistant-focused learning trace."""
@@ -30,7 +37,7 @@ class AssistantMemoryTrace(BaseModel):
     after_state_confidence: float = Field(ge=0.0, le=1.0)
     generality: float = Field(ge=0.0, le=1.0)
 
-    # “cues” for when this should fire again
+    # "cues" for when this should fire again
     tools: set[ToolFlag] = Field(default_factory=set)
     languages: list[str] = Field(default_factory=list)
     domains: list[str] = Field(default_factory=list)
@@ -58,7 +65,7 @@ class MemoryTrace(BaseModel):
     user_id: str
     content: str
     summary: str
-    importance: float
+    importance: float = Field(ge=0.0, le=1.0)
     created_at: datetime
     access_count: int = 0
     tags: set[str] = Field(default_factory=set)
@@ -93,3 +100,13 @@ class MemoryCandidate(BaseModel):
     summary: str
     tags: list[str]
     created_at: datetime
+
+
+class RecallResult(BaseModel):
+    """Everything one recall returns, across the layers."""
+
+    model_config = ConfigDict(frozen=False)
+
+    ltm_candidates: list[MemoryCandidate] = Field(default_factory=list)
+    wm_events: list[dict[str, Any]] = Field(default_factory=list)
+    stm_traces: list[MemoryTrace] = Field(default_factory=list)

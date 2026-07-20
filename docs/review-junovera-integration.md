@@ -1,6 +1,26 @@
 # MemoryCore review — readiness for driving Junovera's memory system
 
-Date: 2026-07-20. Scope: every Python module under `memory_core_py/`, both Rust sources
+> **Update (2026-07-20, same branch): SQL-only refactor landed.** Per the owner's decision
+> ("forget redis and maria db, just sql"), this branch now implements the fixes rather than
+> just cataloguing them. Redis and MariaDB are gone; one SQL database (SQLite by default,
+> any SQLAlchemy URL) backs LTM, STM, and a new `SqlWorkingMemory`. Resolved here:
+> **P0-1** (runtime `datetime` import in `database.py`), **P0-2** (runtime SMK-enum imports
+> in `models.py`), **P0-3** (maturin mixed layout — the Python package is now
+> `memory_core/` with the extension at `memory_core._native`; the wheel verifiably contains
+> both; `pydantic-settings` declared; unused `numpy`/`rand` dropped), **P0-4**
+> (overrides construct settings; zero env vars required), **P1-5** (`Database.create_schema()`,
+> `LongTermStore.fetch_traces_for_user`/`delete_trace`, `MemorySystem.hydrate`), **P1-7**
+> (store I/O via `asyncio.to_thread`), **P1-10** (blake2b stable assistant ids), part of
+> **P1-11** (`recall` marks candidates accessed; `forget()` wired through index + LTM),
+> **P1-12** (importance bounded; WM capped per user). Also added: `Embedder` protocol +
+> optional text-only `remember`/`recall`, typed `RecallResult`, a 27-test pytest suite, and
+> rewritten examples/README/architecture docs. Still open (unchanged Rust engine internals):
+> **P1-6** (multi-user keyword-seeding fallback), **P1-8** (panics → `PyResult`), **P1-9**
+> (enum `TryFrom` + Python/Rust topic-name drift), and the P2 items (assistant-trace
+> persistence table, recency scoring, GIL release). The findings below are kept as written
+> for the record.
+
+Date: 2026-07-20. Scope: every Python module under `memory_core_py/` (now `memory_core/`), both Rust sources
 (`src/lib.rs`, `src/smk_index.rs`), packaging (`pyproject.toml`, `Cargo.toml`, `uv.lock`),
 docs, and examples. All defects below were **reproduced empirically** on Python 3.12 with the
 locked dependency versions, and the Rust engine was built and exercised via the compiled

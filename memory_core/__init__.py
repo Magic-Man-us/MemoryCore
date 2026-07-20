@@ -1,35 +1,30 @@
-"""Memory Core - A multi-layered memory system with vector indexing.
+"""Memory Core — a multi-layered memory system with Rust-backed vector indexing.
 
-This package provides a comprehensive memory system with:
-- Core abstractions (interfaces, models, system orchestrator)
-- Storage layer (LTM, STM, working memory)
-- Indexing layer (Rust-backed vector search, SMK assistant index)
-- Type definitions (SMK types and features)
+One SQL database (SQLite by default) persists long-term, short-term, and working
+memory; all runtime queries hit the in-RAM Rust index (``memory_core._native``).
 """
 
-# Core abstractions
 from .config import MemoryCoreSettings, build_memory_system
 from .core import (
+    AssistantMemoryTrace,
+    Embedder,
     MemoryCandidate,
     MemoryIndex,
     MemorySystem,
     MemoryTrace,
+    RecallResult,
 )
-
-# Indexing layer
 from .indexing import (
     AssistantMemoryIndex,
     RustMemoryIndex,
 )
-
-# Storage layer
 from .storage import (
+    Database,
+    DatabaseSettings,
     LongTermStore,
-    RedisWorkingMemory,
     ShortTermStore,
+    SqlWorkingMemory,
 )
-
-# Type definitions
 from .types import (
     Level2Bits,
     MemoryKind,
@@ -39,23 +34,23 @@ from .types import (
 )
 
 __all__ = [
-    # Indexing
     "AssistantMemoryIndex",
-    # Types
+    "AssistantMemoryTrace",
+    "Database",
+    "DatabaseSettings",
+    "Embedder",
     "Level2Bits",
-    # Storage
     "LongTermStore",
-    # Core
     "MemoryCandidate",
-    # Config
     "MemoryCoreSettings",
     "MemoryIndex",
     "MemoryKind",
     "MemorySystem",
     "MemoryTrace",
-    "RedisWorkingMemory",
+    "RecallResult",
     "RustMemoryIndex",
     "ShortTermStore",
+    "SqlWorkingMemory",
     "ToolFlag",
     "TopicBucket",
     "build_memory_system",

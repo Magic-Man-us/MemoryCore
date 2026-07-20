@@ -590,7 +590,7 @@ impl PyAssistantMemoryIndex {
 
 
 #[pymodule]
-fn memory_core(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn _native(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // conversation/user memory
     m.add_class::<PyMemoryEngine>()?;
     m.add_class::<PyMemoryCandidate>()?;

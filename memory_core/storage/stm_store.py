@@ -1,65 +1,30 @@
+"""Short-term store: TTL'd traces for fast recency recall, in the shared SQL database."""
+
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from datetime import UTC, datetime
+from typing import Any
 
-from sqlalchemy import func, select
-from sqlalchemy.dialects.mysql import insert
+from sqlalchemy import delete, select
 
-from memory_core_py.core.models import MemoryTrace
+from memory_core.core.models import MemoryTrace
 
-from .database import ShortTermTraceORM
-from .settings import ShortTermStoreSettings, build_engine_and_session
-
-if TYPE_CHECKING:
-    from datetime import datetime
-
-    from sqlalchemy.orm import Session
+from .database import Database, ShortTermTraceORM
 
 
 class ShortTermStore:
-    """MariaDB-backed cache that keeps short-lived traces for fast recall."""
+    """SQL-backed cache that keeps short-lived traces for fast recall."""
 
-    def __init__(
-        self,
-        *,
-        settings: ShortTermStoreSettings | None = None,
-        **overrides: Any,
-    ) -> None:
-        base_settings = settings or ShortTermStoreSettings()
-        (
-            self._settings,
-            self._engine,
-            self._session_factory,
-        ) = build_engine_and_session(base_settings, overrides)
-
-    def _session(self) -> Session:
-        """Create a new SQLAlchemy session."""
-        return self._session_factory()
+    def __init__(self, db: Database) -> None:
+        self._db = db
 
     def insert_trace(self, trace: MemoryTrace, expires_at: datetime) -> None:
-        """Insert or upsert the given trace with an explicit expiration time."""
-        insert_values = self._serialize_trace(trace, expires_at)
-
-        stmt = insert(ShortTermTraceORM).values(**insert_values)
-
-        upsert_columns = (
-            "content",
-            "summary",
-            "importance",
-            "access_count",
-            "last_accessed",
-            "expires_at",
-            "tags",
-            "extra",
-        )
-        stmt = stmt.on_duplicate_key_update(
-            **{column: getattr(stmt.inserted, column) for column in upsert_columns}
-        )
-
-        session = self._session()
+        """Insert or update the given trace with an explicit expiration time."""
+        row = ShortTermTraceORM(**self._serialize_trace(trace, expires_at))
+        session = self._db.session()
         try:
-            session.execute(stmt)
+            session.merge(row)
             session.commit()
         finally:
             session.close()
@@ -69,20 +34,32 @@ class ShortTermStore:
         user_id: str,
         limit: int = 50,
     ) -> list[MemoryTrace]:
-        """Load the most recent non-expired traces for a user."""
-        session = self._session()
+        """The most recent non-expired traces for a user."""
+        session = self._db.session()
         try:
             stmt = (
                 select(ShortTermTraceORM)
                 .where(ShortTermTraceORM.user_id == user_id)
-                .where(ShortTermTraceORM.expires_at > func.now())
+                .where(ShortTermTraceORM.expires_at > datetime.now(UTC))
                 .order_by(ShortTermTraceORM.created_at.desc())
                 .limit(limit)
             )
-
             results = session.execute(stmt).scalars().all()
-
             return [self._row_to_trace(row) for row in results]
+        finally:
+            session.close()
+
+    def purge_expired(self) -> int:
+        """Delete expired rows; returns the number removed."""
+        session = self._db.session()
+        try:
+            result = session.execute(
+                delete(ShortTermTraceORM).where(
+                    ShortTermTraceORM.expires_at <= datetime.now(UTC)
+                )
+            )
+            session.commit()
+            return int(result.rowcount or 0)
         finally:
             session.close()
 
@@ -91,10 +68,8 @@ class ShortTermStore:
         trace: MemoryTrace,
         expires_at: datetime,
     ) -> dict[str, Any]:
-        """Prepare trace fields for database persistence."""
         base_payload = trace.model_dump(exclude={"tags", "extra"})
         json_payload = trace.model_dump(mode="json", include={"tags", "extra"})
-
         return {
             **base_payload,
             "last_accessed": trace.created_at,
@@ -104,7 +79,6 @@ class ShortTermStore:
         }
 
     def _row_to_trace(self, row: ShortTermTraceORM) -> MemoryTrace:
-        """Convert an ORM row back into a MemoryTrace."""
         return MemoryTrace.model_validate(
             {
                 "trace_uid": row.trace_uid,
@@ -123,7 +97,6 @@ class ShortTermStore:
     def _decode_tags(raw_tags: str | None) -> set[str]:
         if not raw_tags:
             return set()
-
         try:
             tags = json.loads(raw_tags)
         except json.JSONDecodeError:
@@ -134,7 +107,6 @@ class ShortTermStore:
     def _decode_extra(raw_extra: str | None) -> dict[str, Any]:
         if not raw_extra:
             return {}
-
         try:
             extra = json.loads(raw_extra)
         except json.JSONDecodeError:
