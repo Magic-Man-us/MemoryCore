@@ -63,6 +63,14 @@ class TestLongTermStore:
         [(trace, embedding)] = store.fetch_traces_for_user("alice")
         assert embedding is None
 
+    def test_extra_roundtrip(self, db):
+        store = LongTermStore(db)
+        store.upsert_trace(
+            _trace("u3", extra={"source": "slack", "session": "s-1"}), embedding=[0.1]
+        )
+        [(trace, _)] = store.fetch_traces_for_user("alice")
+        assert trace.extra == {"source": "slack", "session": "s-1"}
+
 
 class TestShortTermStore:
     def test_insert_and_fetch_non_expired(self, db):

@@ -38,6 +38,7 @@ class LongTermTraceORM(Base):
     created_at: Mapped[datetime] = mapped_column(nullable=False)
     access_count: Mapped[int] = mapped_column(default=0, nullable=False)
     tags: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extra: Mapped[str | None] = mapped_column(Text, nullable=True)
     embedding: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
 
 

@@ -44,6 +44,7 @@ class LongTermStore:
             created_at=trace.created_at,
             access_count=trace.access_count,
             tags=json.dumps(sorted(trace.tags)),
+            extra=json.dumps(trace.extra) if trace.extra else None,
             embedding=emb_bytes,
         )
         session = self._db.session()
@@ -93,6 +94,7 @@ class LongTermStore:
             created_at=row.created_at,
             access_count=row.access_count,
             tags=_decode_tags(row.tags),
+            extra=_decode_extra(row.extra),
         )
 
     @staticmethod
@@ -116,3 +118,13 @@ def _decode_tags(raw_tags: str | None) -> set[str]:
     except json.JSONDecodeError:
         return set()
     return set(tags) if isinstance(tags, list) else set()
+
+
+def _decode_extra(raw_extra: str | None) -> dict[str, object]:
+    if not raw_extra:
+        return {}
+    try:
+        extra = json.loads(raw_extra)
+    except json.JSONDecodeError:
+        return {}
+    return extra if isinstance(extra, dict) else {}
