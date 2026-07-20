@@ -13,7 +13,10 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from memory_core.types.smk_types import MemoryKind, ToolFlag, TopicBucket
+# NOTE: runtime imports on purpose — these enums are pydantic *field types* on
+# AssistantMemoryTrace, so hiding them behind TYPE_CHECKING leaves the model
+# permanently "not fully defined" and unusable at runtime.
+from memory_core.types.smk_types import MemoryKind, ToolFlag, TopicBucket  # noqa: TC001
 
 
 class AssistantMemoryTrace(BaseModel):

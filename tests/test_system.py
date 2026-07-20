@@ -38,6 +38,27 @@ async def test_remember_recall_roundtrip(system):
     assert [t.trace_uid for t in result.stm_traces] == [trace.trace_uid]
 
 
+async def test_working_memory_can_be_skipped_on_remember(system):
+    await system.remember(
+        user_id="alice",
+        summary="quiet write",
+        importance=0.5,
+        tags=[],
+        also_working_mem=False,
+    )
+    result = await system.recall(user_id="alice", query_text="quiet write", limit=5)
+    assert result.wm_events == []
+
+
+async def test_working_memory_can_be_excluded_on_recall(system):
+    await system.remember(user_id="alice", summary="noisy write", importance=0.5, tags=[])
+    result = await system.recall(
+        user_id="alice", query_text="noisy write", limit=5, include_working_mem=False
+    )
+    assert result.wm_events == []
+    assert len(result.ltm_candidates) == 1
+
+
 async def test_recall_requires_embedder_or_embedding(db):
     system = MemorySystem(
         memory_index=RustMemoryIndex(),
@@ -64,6 +85,19 @@ async def test_explicit_embedding_still_works(db):
     result = await system.recall(
         user_id="alice", query_text="s", limit=5, query_embedding=[0.1, 0.2, 0.3]
     )
+    assert len(result.ltm_candidates) == 1
+
+
+async def test_stm_is_optional(db, embedder):
+    system = MemorySystem(
+        memory_index=RustMemoryIndex(),
+        working_mem=SqlWorkingMemory(db),
+        ltm_store=LongTermStore(db),
+        embedder=embedder,
+    )
+    await system.remember(user_id="alice", summary="no stm", importance=0.5, tags=[])
+    result = await system.recall(user_id="alice", query_text="no stm", limit=5)
+    assert result.stm_traces == []
     assert len(result.ltm_candidates) == 1
 
 
