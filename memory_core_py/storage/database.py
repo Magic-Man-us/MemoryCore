@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+# NOTE: this must be a runtime import, not TYPE_CHECKING — SQLAlchemy resolves
+# ``Mapped[datetime]`` annotations when the class is declared, and hiding the
+# import breaks the whole package at import time (MappedAnnotationError).
+from datetime import datetime  # noqa: TC003
 
 from sqlalchemy import LargeBinary, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-
-if TYPE_CHECKING:
-    from datetime import datetime
 
 
 class Base(DeclarativeBase):
