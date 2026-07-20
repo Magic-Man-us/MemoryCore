@@ -123,3 +123,18 @@ class TestSqlWorkingMemory:
         wm.add_event("alice", {"n": 1})
         wm.clear("alice")
         assert wm.get_recent("alice") == []
+
+    def test_server_ts_is_authoritative(self, db):
+        wm = SqlWorkingMemory(db, ttl_seconds=60)
+        wm.add_event("alice", {"n": 1, "ts": "1999-01-01T00:00:00+00:00"})
+        [event] = wm.get_recent("alice")
+        assert event["ts"] != "1999-01-01T00:00:00+00:00"
+        assert event["n"] == 1
+
+    def test_non_serializable_payload_raises_value_error(self, db):
+        import pytest
+
+        wm = SqlWorkingMemory(db, ttl_seconds=60)
+        with pytest.raises(ValueError, match="JSON-serializable"):
+            wm.add_event("alice", {"bad": object()})
+        assert wm.get_recent("alice") == []  # nothing was written

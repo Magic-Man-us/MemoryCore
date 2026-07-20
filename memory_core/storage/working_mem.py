@@ -33,13 +33,20 @@ class SqlWorkingMemory:
         self.max_events = max_events
 
     def add_event(self, user_id: str, payload: dict[str, Any]) -> None:
-        """Append one event for the user; opportunistically prunes expired/overflow rows."""
+        """Append one event for the user; opportunistically prunes expired/overflow rows.
+
+        The server-stamped ``ts`` is authoritative — a ``ts`` key in the payload is
+        overwritten, not trusted. A payload that cannot be JSON-serialized raises a
+        clear ``ValueError`` before anything touches the database.
+        """
         now = datetime.now(UTC)
         doc = {**payload, "ts": now.isoformat()}
         try:
             payload_json = json.dumps(doc)
         except (TypeError, ValueError) as exc:
-            raise ValueError("working-memory event payload must be JSON-serializable") from exc
+            raise ValueError(
+                f"working-memory event payload must be JSON-serializable: {exc}"
+            ) from exc
         session = self._db.session()
         try:
             session.add(
