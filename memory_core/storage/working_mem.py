@@ -35,7 +35,11 @@ class SqlWorkingMemory:
     def add_event(self, user_id: str, payload: dict[str, Any]) -> None:
         """Append one event for the user; opportunistically prunes expired/overflow rows."""
         now = datetime.now(UTC)
-        doc = {"ts": now.isoformat(), **payload}
+        doc = {**payload, "ts": now.isoformat()}
+        try:
+            payload_json = json.dumps(doc)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("working-memory event payload must be JSON-serializable") from exc
         session = self._db.session()
         try:
             session.add(
@@ -43,7 +47,7 @@ class SqlWorkingMemory:
                     user_id=user_id,
                     created_at=now,
                     expires_at=now + timedelta(seconds=self.ttl_seconds),
-                    payload=json.dumps(doc),
+                    payload=payload_json,
                 )
             )
             # Prune this user's expired events on every write (cheap, indexed).
