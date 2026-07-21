@@ -1,5 +1,21 @@
 
+use std::cmp::Ordering;
 use std::fmt;
+
+/// Descending comparator for similarity scores that defines a true total order:
+/// bare `partial_cmp(...).unwrap_or(Equal)` treats every NaN as tied with every
+/// finite score, which breaks `sort_by`'s ordering contract and can leave NaN
+/// hits scattered through (or even ahead of) valid results. NaN is explicitly
+/// the worst score and always sinks to the end, regardless of its sign bit;
+/// finite scores use `total_cmp` for a well-defined order among themselves.
+pub(crate) fn score_cmp_desc(a: f32, b: f32) -> Ordering {
+    match (a.is_nan(), b.is_nan()) {
+        (true, true) => Ordering::Equal,
+        (true, false) => Ordering::Greater, // a is NaN: a sorts after (worse than) b
+        (false, true) => Ordering::Less,    // b is NaN: b sorts after (worse than) a
+        (false, false) => b.total_cmp(&a),  // descending among finite scores
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct StructuredMemoryKey(pub(crate) u64);
@@ -345,8 +361,9 @@ impl RustMemoryIndex {
             })
             .collect();
 
-        // NaN-safe: a non-finite score (a NaN in any embedding) must not panic the sort.
-        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        // NaN-safe: a non-finite score (a NaN in any embedding) sinks to the bottom
+        // under a true total order, rather than merely not panicking.
+        scores.sort_by(|a, b| score_cmp_desc(a.1, b.1));
         scores.truncate(k);
         Ok(scores)
     }

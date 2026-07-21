@@ -67,6 +67,51 @@ def test_engine_query_dim_mismatch_raises_value_error():
         )
 
 
+def test_engine_nan_score_sinks_to_the_bottom_deterministically():
+    """PR review: unwrap_or(Equal) ties NaN with every finite score, so a naive fix
+    that only avoids the panic can still scatter NaN hits through valid results.
+    score_cmp_desc must give NaN a fixed, worst-ranked position."""
+    engine = PyMemoryEngine()
+    nan_emb = [float("nan")] * DIM
+    engine.ingest_trace("good1", "alice", "s1", 0.9, 1, 0, [], emb(1))
+    engine.ingest_trace("bad", "alice", "s2", 0.9, 2, 0, [], nan_emb)
+    engine.ingest_trace("good2", "alice", "s3", 0.5, 3, 0, [], emb(4))
+
+    orders = [
+        [c.trace_uid for c in engine.search_candidates(
+            user_id="alice", text="", tags=[], limit=10, query_embedding=emb(1)
+        )]
+        for _ in range(5)
+    ]
+    assert all(order == orders[0] for order in orders), "sort must be deterministic"
+    assert orders[0][-1] == "bad"  # NaN always ranks last
+    assert set(orders[0][:-1]) == {"good1", "good2"}
+
+
+def test_smk_nan_score_sinks_to_the_bottom_deterministically():
+    from memory_core._native import PyAssistantMemoryIndex, PySmkQuery
+
+    index = PyAssistantMemoryIndex(DIM)
+    nan_emb = [float("nan")] * DIM
+    index.add(
+        id=1, topic=1, kind=1, tool_mask=0, difficulty=0, generality=0,
+        importance=0, embedding=emb(1),
+    )
+    index.add(
+        id=2, topic=1, kind=1, tool_mask=0, difficulty=0, generality=0,
+        importance=0, embedding=nan_emb,
+    )
+    index.add(
+        id=3, topic=1, kind=1, tool_mask=0, difficulty=0, generality=0,
+        importance=0, embedding=emb(4),
+    )
+
+    hits = index.query_top_k_filtered(emb(1), 10, PySmkQuery())
+    ids = [h[0] for h in hits]
+    assert ids[-1] == 2  # the NaN-embedding memory always ranks last
+    assert set(ids[:-1]) == {1, 3}
+
+
 def test_smk_roundtrip_via_wrapper():
     index = AssistantMemoryIndex(dim=DIM)
     trace = AssistantMemoryTrace(

@@ -11,6 +11,7 @@ use smk_index::{
     TopicBucket,
     MemoryKind,
     Level2Bits,
+    score_cmp_desc,
 };
 
 #[derive(Clone)]
@@ -290,12 +291,10 @@ impl MemoryEngine {
             });
         }
 
-        // 5. Sort and take top-k
-        scored.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        // 5. Sort and take top-k. NaN-safe under a true total order (see
+        // score_cmp_desc): a non-finite score sinks to the bottom rather than
+        // merely not panicking or scattering through the ranked results.
+        scored.sort_by(|a, b| score_cmp_desc(a.score, b.score));
         scored.truncate(query.limit);
 
         Ok(scored)
