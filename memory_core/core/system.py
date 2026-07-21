@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from memory_core.types.smk_types import MemoryKind, ToolFlag, TopicBucket
 
@@ -78,12 +78,14 @@ class MemorySystem:
         tags: list[str],
         content: str = "",
         embedding: Iterable[float] | None = None,
+        extra: dict[str, Any] | None = None,
         also_working_mem: bool = True,
     ) -> MemoryTrace:
         """Persist a new trace across STM, LTM, the vector index, and working memory.
 
         Pass ``embedding`` explicitly, or construct the system with an ``Embedder``
-        and it is computed here from the summary + content.
+        and it is computed here from the summary + content. ``extra`` carries
+        provenance (source surface, session id, …) and round-trips through LTM.
         """
         trace = MemoryTrace(
             trace_uid=str(uuid.uuid4()),
@@ -94,6 +96,7 @@ class MemorySystem:
             created_at=datetime.now(UTC),
             access_count=0,
             tags=set(tags),
+            extra=dict(extra) if extra else {},
         )
 
         emb_list = await self._resolve_embedding(embedding, f"{summary}\n{content}".strip())

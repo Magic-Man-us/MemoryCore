@@ -11,6 +11,7 @@ use smk_index::{
     TopicBucket,
     MemoryKind,
     Level2Bits,
+    score_cmp_desc,
 };
 
 #[derive(Clone)]
@@ -209,22 +210,36 @@ impl MemoryEngine {
     /// Core search logic.
     ///
     /// This does:
-    /// 1. Filter by user
-    /// 2. Seed candidates from tags + keywords
-    /// 3. If candidate set is too small, fallback to all traces for that user
+    /// 1. Seed candidates from tags + keywords
+    /// 2. Filter the seeds to this user's live traces (BEFORE the fallback decision,
+    ///    so other users' keyword matches cannot suppress the fallback and silently
+    ///    collapse recall to zero)
+    /// 3. If the user's candidate set is too small, fall back to all their traces
     /// 4. Score with semantic similarity + importance
     /// 5. Return top-k
-    fn search_candidates(&self, query: QuerySpec, query_embedding: &[f32]) -> Vec<Candidate> {
+    fn search_candidates(
+        &self,
+        query: QuerySpec,
+        query_embedding: &[f32],
+    ) -> Result<Vec<Candidate>, String> {
+        if let Some(dim) = self.embedding_dim {
+            if !query_embedding.is_empty() && query_embedding.len() != dim {
+                return Err(format!(
+                    "query embedding dimension mismatch: expected {}, got {}",
+                    dim,
+                    query_embedding.len()
+                ));
+            }
+        }
+
         let mut candidate_indices: HashSet<usize> = HashSet::new();
 
-        // 1. tags
+        // 1. tags + keywords
         for tag in query.tags.iter() {
             if let Some(indices) = self.tag_index.get(&tag.to_ascii_lowercase()) {
                 candidate_indices.extend(indices);
             }
         }
-
-        // 2. keywords
         let tokens = Self::tokenize(&query.text);
         for token in tokens {
             if let Some(indices) = self.keyword_index.get(&token) {
@@ -232,7 +247,14 @@ impl MemoryEngine {
             }
         }
 
-        // 3. If too few candidates, fall back to all traces for that user
+        // 2. Keep only this user's live traces.
+        candidate_indices.retain(|&idx| {
+            self.traces
+                .get(idx)
+                .map_or(false, |t| !t.deleted && t.user_id == query.user_id)
+        });
+
+        // 3. If too few of the user's own traces matched, fall back to all of them.
         if candidate_indices.len() < query.limit {
             for (idx, trace) in self.traces.iter().enumerate() {
                 if trace.deleted {
@@ -253,13 +275,6 @@ impl MemoryEngine {
             }
 
             let trace = &self.traces[idx];
-            if trace.deleted {
-                continue;
-            }
-            if trace.user_id != query.user_id {
-                continue;
-            }
-
             let emb = &self.embeddings[idx];
             let semantic = Self::cosine_similarity(query_embedding, emb);
             let importance = trace.importance;
@@ -276,15 +291,13 @@ impl MemoryEngine {
             });
         }
 
-        // 5. Sort and take top-k
-        scored.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        // 5. Sort and take top-k. NaN-safe under a true total order (see
+        // score_cmp_desc): a non-finite score sinks to the bottom rather than
+        // merely not panicking or scattering through the ranked results.
+        scored.sort_by(|a, b| score_cmp_desc(a.score, b.score));
         scored.truncate(query.limit);
 
-        scored
+        Ok(scored)
     }
 }
 
@@ -402,7 +415,8 @@ impl PyMemoryEngine {
 
     /// Search candidates for a given query.
     ///
-    /// Returns a list of PyMemoryCandidate objects.
+    /// Returns a list of PyMemoryCandidate objects; raises ValueError on a
+    /// query-embedding dimension mismatch.
     pub fn search_candidates(
         &self,
         user_id: String,
@@ -410,7 +424,7 @@ impl PyMemoryEngine {
         tags: Vec<String>,
         limit: usize,
         query_embedding: Vec<f32>,
-    ) -> Vec<PyMemoryCandidate> {
+    ) -> PyResult<Vec<PyMemoryCandidate>> {
         let q = QuerySpec {
             user_id,
             text,
@@ -420,9 +434,8 @@ impl PyMemoryEngine {
 
         self.inner
             .search_candidates(q, &query_embedding)
-            .into_iter()
-            .map(PyMemoryCandidate::from)
-            .collect()
+            .map(|candidates| candidates.into_iter().map(PyMemoryCandidate::from).collect())
+            .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 }
 #[pyclass]
@@ -446,42 +459,35 @@ impl PySmkQuery {
         allowed_kinds: Option<Vec<u8>>,
         min_generality: Option<u8>,
         min_importance: Option<u8>,
-    ) -> Self {
-        let topic_enum = topic.map(|t| match t {
-            1 => TopicBucket::RustPythonToolchain,
-            2 => TopicBucket::MemoryArchitecture,
-            3 => TopicBucket::AwsIam,
-            4 => TopicBucket::DbSchema,
-            _ => TopicBucket::RustPythonToolchain,
-        });
+    ) -> PyResult<Self> {
+        // Unknown discriminants are rejected, not silently coerced: a filter built
+        // from a bad value must fail loudly instead of quietly matching the wrong
+        // memories.
+        let topic_enum = topic
+            .map(TopicBucket::try_from)
+            .transpose()
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
 
-        let kinds_enum = allowed_kinds.map(|ks| {
-            ks.into_iter()
-                .map(|k| match k {
-                    0 => MemoryKind::Insight,
-                    1 => MemoryKind::Pattern,
-                    2 => MemoryKind::AntiPattern,
-                    3 => MemoryKind::Principle,
-                    _ => MemoryKind::Workflow,
-                })
-                .collect()
-        });
+        let kinds_enum = allowed_kinds
+            .map(|ks| {
+                ks.into_iter()
+                    .map(MemoryKind::try_from)
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
 
-        let min_gen = min_generality.map(|g| match g {
-            0 => Level2Bits::Low,
-            1 => Level2Bits::Medium,
-            2 => Level2Bits::High,
-            _ => Level2Bits::Extreme,
-        });
+        let min_gen = min_generality
+            .map(Level2Bits::try_from)
+            .transpose()
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
 
-        let min_imp = min_importance.map(|i| match i {
-            0 => Level2Bits::Low,
-            1 => Level2Bits::Medium,
-            2 => Level2Bits::High,
-            _ => Level2Bits::Extreme,
-        });
+        let min_imp = min_importance
+            .map(Level2Bits::try_from)
+            .transpose()
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
 
-        PySmkQuery {
+        Ok(PySmkQuery {
             inner: SmkQuery {
                 topic: topic_enum,
                 required_tools_mask,
@@ -489,7 +495,7 @@ impl PySmkQuery {
                 min_generality: min_gen,
                 min_importance: min_imp,
             },
-        }
+        })
     }
 }
 
@@ -510,6 +516,8 @@ impl PyAssistantMemoryIndex {
     /// Add a memory into the assistant index.
     ///
     /// `id` is a 64-bit internal ID (you can derive from trace_uid in Python).
+    /// Raises ValueError on an unknown enum discriminant or an embedding whose
+    /// dimension does not match the index.
     pub fn add(
         &mut self,
         id: u64,
@@ -520,43 +528,17 @@ impl PyAssistantMemoryIndex {
         generality: u8,
         importance: u8,
         embedding: Vec<f32>,
-    ) {
-        let topic_enum = match topic {
-            1 => TopicBucket::RustPythonToolchain,
-            2 => TopicBucket::MemoryArchitecture,
-            3 => TopicBucket::AwsIam,
-            4 => TopicBucket::DbSchema,
-            _ => TopicBucket::RustPythonToolchain,
-        };
-
-        let kind_enum = match kind {
-            0 => MemoryKind::Insight,
-            1 => MemoryKind::Pattern,
-            2 => MemoryKind::AntiPattern,
-            3 => MemoryKind::Principle,
-            _ => MemoryKind::Workflow,
-        };
-
-        let diff_enum = match difficulty {
-            0 => Level2Bits::Low,
-            1 => Level2Bits::Medium,
-            2 => Level2Bits::High,
-            _ => Level2Bits::Extreme,
-        };
-
-        let gen_enum = match generality {
-            0 => Level2Bits::Low,
-            1 => Level2Bits::Medium,
-            2 => Level2Bits::High,
-            _ => Level2Bits::Extreme,
-        };
-
-        let imp_enum = match importance {
-            0 => Level2Bits::Low,
-            1 => Level2Bits::Medium,
-            2 => Level2Bits::High,
-            _ => Level2Bits::Extreme,
-        };
+    ) -> PyResult<()> {
+        let topic_enum =
+            TopicBucket::try_from(topic).map_err(pyo3::exceptions::PyValueError::new_err)?;
+        let kind_enum =
+            MemoryKind::try_from(kind).map_err(pyo3::exceptions::PyValueError::new_err)?;
+        let diff_enum =
+            Level2Bits::try_from(difficulty).map_err(pyo3::exceptions::PyValueError::new_err)?;
+        let gen_enum =
+            Level2Bits::try_from(generality).map_err(pyo3::exceptions::PyValueError::new_err)?;
+        let imp_enum =
+            Level2Bits::try_from(importance).map_err(pyo3::exceptions::PyValueError::new_err)?;
 
         let smk = StructuredMemoryKey::new(
             topic_enum,
@@ -568,23 +550,29 @@ impl PyAssistantMemoryIndex {
         );
 
         let mem = smk_index::MemoryTrace { id, embedding, smk };
-        self.inner.add(mem);
+        self.inner
+            .add(mem)
+            .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 
     /// Query with a vector + SMK query.
     ///
-    /// Returns a list of triples (id, score, smk_raw).
+    /// Returns a list of triples (id, score, smk_raw); raises ValueError on a
+    /// query dimension mismatch.
     pub fn query_top_k_filtered(
         &self,
         query: Vec<f32>,
         k: usize,
         smk_query: &PySmkQuery,
-    ) -> Vec<(u64, f32, u64)> {
+    ) -> PyResult<Vec<(u64, f32, u64)>> {
         self.inner
             .query_top_k_filtered(&query, k, &smk_query.inner)
-            .into_iter()
-            .map(|(id, score, smk)| (id, score, smk.raw()))
-            .collect()
+            .map(|hits| {
+                hits.into_iter()
+                    .map(|(id, score, smk)| (id, score, smk.raw()))
+                    .collect()
+            })
+            .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 }
 

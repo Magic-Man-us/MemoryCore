@@ -35,6 +35,10 @@ class LongTermStore:
         if embedding is not None:
             emb_bytes = json.dumps(list(embedding)).encode("utf-8")
 
+        # mode="json" coerces non-native values (datetimes, paths, …) the same way
+        # the STM store does, so one trace serializes identically in both stores.
+        extra_json = trace.model_dump(mode="json", include={"extra"})["extra"]
+
         row = LongTermTraceORM(
             trace_uid=trace.trace_uid,
             user_id=trace.user_id,
@@ -44,6 +48,7 @@ class LongTermStore:
             created_at=trace.created_at,
             access_count=trace.access_count,
             tags=json.dumps(sorted(trace.tags)),
+            extra=json.dumps(extra_json) if extra_json else None,
             embedding=emb_bytes,
         )
         session = self._db.session()
@@ -93,6 +98,7 @@ class LongTermStore:
             created_at=row.created_at,
             access_count=row.access_count,
             tags=_decode_tags(row.tags),
+            extra=_decode_extra(row.extra),
         )
 
     @staticmethod
@@ -116,3 +122,13 @@ def _decode_tags(raw_tags: str | None) -> set[str]:
     except json.JSONDecodeError:
         return set()
     return set(tags) if isinstance(tags, list) else set()
+
+
+def _decode_extra(raw_extra: str | None) -> dict[str, object]:
+    if not raw_extra:
+        return {}
+    try:
+        extra = json.loads(raw_extra)
+    except json.JSONDecodeError:
+        return {}
+    return extra if isinstance(extra, dict) else {}

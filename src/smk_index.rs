@@ -1,5 +1,21 @@
 
+use std::cmp::Ordering;
 use std::fmt;
+
+/// Descending comparator for similarity scores that defines a true total order:
+/// bare `partial_cmp(...).unwrap_or(Equal)` treats every NaN as tied with every
+/// finite score, which breaks `sort_by`'s ordering contract and can leave NaN
+/// hits scattered through (or even ahead of) valid results. NaN is explicitly
+/// the worst score and always sinks to the end, regardless of its sign bit;
+/// finite scores use `total_cmp` for a well-defined order among themselves.
+pub(crate) fn score_cmp_desc(a: f32, b: f32) -> Ordering {
+    match (a.is_nan(), b.is_nan()) {
+        (true, true) => Ordering::Equal,
+        (true, false) => Ordering::Greater, // a is NaN: a sorts after (worse than) b
+        (false, true) => Ordering::Less,    // b is NaN: b sorts after (worse than) a
+        (false, false) => b.total_cmp(&a),  // descending among finite scores
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct StructuredMemoryKey(pub(crate) u64);
@@ -13,6 +29,20 @@ pub enum TopicBucket {
     DbSchema = 4,
 }
 
+impl TryFrom<u8> for TopicBucket {
+    type Error = String;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(TopicBucket::RustPythonToolchain),
+            2 => Ok(TopicBucket::MemoryArchitecture),
+            3 => Ok(TopicBucket::AwsIam),
+            4 => Ok(TopicBucket::DbSchema),
+            other => Err(format!("invalid topic discriminant: {other} (expected 1..=4)")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum MemoryKind {
@@ -23,6 +53,21 @@ pub enum MemoryKind {
     Workflow = 4,
 }
 
+impl TryFrom<u8> for MemoryKind {
+    type Error = String;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(MemoryKind::Insight),
+            1 => Ok(MemoryKind::Pattern),
+            2 => Ok(MemoryKind::AntiPattern),
+            3 => Ok(MemoryKind::Principle),
+            4 => Ok(MemoryKind::Workflow),
+            other => Err(format!("invalid kind discriminant: {other} (expected 0..=4)")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
 pub enum Level2Bits {
@@ -30,6 +75,20 @@ pub enum Level2Bits {
     Medium = 1,
     High = 2,
     Extreme = 3,
+}
+
+impl TryFrom<u8> for Level2Bits {
+    type Error = String;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Level2Bits::Low),
+            1 => Ok(Level2Bits::Medium),
+            2 => Ok(Level2Bits::High),
+            3 => Ok(Level2Bits::Extreme),
+            other => Err(format!("invalid level discriminant: {other} (expected 0..=3)")),
+        }
+    }
 }
 
 // Tool bitflags (16 bits max).
@@ -249,9 +308,16 @@ impl RustMemoryIndex {
         Self { dim, memories: Vec::new() }
     }
 
-    pub fn add(&mut self, mem: MemoryTrace) {
-        assert_eq!(mem.embedding.len(), self.dim);
+    pub fn add(&mut self, mem: MemoryTrace) -> Result<(), String> {
+        if mem.embedding.len() != self.dim {
+            return Err(format!(
+                "embedding dimension mismatch: expected {}, got {}",
+                self.dim,
+                mem.embedding.len()
+            ));
+        }
         self.memories.push(mem);
+        Ok(())
     }
 
     fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
@@ -276,8 +342,14 @@ impl RustMemoryIndex {
         query: &[f32],
         k: usize,
         smk_query: &SmkQuery,
-    ) -> Vec<(u64, f32, StructuredMemoryKey)> {
-        assert_eq!(query.len(), self.dim);
+    ) -> Result<Vec<(u64, f32, StructuredMemoryKey)>, String> {
+        if query.len() != self.dim {
+            return Err(format!(
+                "query dimension mismatch: expected {}, got {}",
+                self.dim,
+                query.len()
+            ));
+        }
 
         let mut scores: Vec<(u64, f32, StructuredMemoryKey)> = self
             .memories
@@ -289,8 +361,10 @@ impl RustMemoryIndex {
             })
             .collect();
 
-        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        // NaN-safe: a non-finite score (a NaN in any embedding) sinks to the bottom
+        // under a true total order, rather than merely not panicking.
+        scores.sort_by(|a, b| score_cmp_desc(a.1, b.1));
         scores.truncate(k);
-        scores
+        Ok(scores)
     }
 }
