@@ -8,4 +8,4 @@ name = "_native"
 crate-type = ["cdylib"]   # required for Python extension
 
 [dependencies]
-pyo3 = { version = "0.24", features = ["extension-module", "macros"] }
+pyo3 = { version = "0.29", features = ["extension-module", "macros"] }
