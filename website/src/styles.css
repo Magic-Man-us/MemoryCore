@@ -1150,6 +1150,10 @@ footer > div a:hover {
 }
 
 @media (max-width: 650px) {
+  html {
+    scroll-padding-top: 68px;
+  }
+
   .site-header {
     height: 68px;
     padding: 0 18px;
