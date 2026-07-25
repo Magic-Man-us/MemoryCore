@@ -120,9 +120,12 @@ nav a:focus-visible::after {
   transition: border-color 180ms ease, background 180ms ease;
 }
 
-.github-button:hover {
+.github-button:hover,
+.github-button:focus-visible {
   border-color: #6c82a8;
   background: rgba(52, 75, 116, 0.22);
+  outline: 2px solid rgba(53, 231, 255, 0.65);
+  outline-offset: 3px;
 }
 
 .github-button svg {
