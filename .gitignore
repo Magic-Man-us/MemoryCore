@@ -61,6 +61,10 @@ Desktop.ini
 Pipfile.lock
 poetry.lock
 
+# Website tooling
+.npm-cache/
+website/node_modules/
+
 # SQLite databases
 *.db
 *.db-wal

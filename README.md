@@ -3,6 +3,9 @@
 A memory engine for AI assistants: SQL persistence with in-RAM vector search, built with
 Rust and exposed to Python via PyO3.
 
+[Explore the MemoryCore website](https://magic-man-us.github.io/MemoryCore/) for the visual
+overview, architecture, performance profile, and quickstart.
+
 All runtime queries hit a Rust-backed in-memory index (1-10ms). One SQL database — a local
 SQLite file by default, PostgreSQL if you point the URL at one — persists long-term memory,
 short-term memory, and working memory. No services required.

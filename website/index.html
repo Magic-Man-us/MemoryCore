@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="MemoryCore is a Rust-backed memory engine for Python AI assistants with 1–10 ms in-RAM recall and durable SQL persistence."
+    />
+    <meta name="theme-color" content="#050814" />
+    <title>MemoryCore — Memory at thought speed</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;650&family=Geist+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="MemoryCore home">
+        <svg class="memory-mark" aria-hidden="true" viewBox="0 0 48 48" fill="none">
+          <path d="M7 13.2 15.5 8 24 13.2 32.5 8 41 13.2v21.6L32.5 40 24 34.8 15.5 40 7 34.8V13.2Z" />
+          <path d="m14 18 10 6 10-6M24 24v10" />
+        </svg>
+        <span>MemoryCore</span>
+      </a>
+
+      <nav aria-label="Primary navigation">
+        <a href="#architecture">Architecture</a>
+        <a href="#performance">Performance</a>
+        <a href="#quickstart">Quick start</a>
+      </nav>
+
+      <a
+        class="github-button"
+        href="https://github.com/Magic-Man-us/MemoryCore"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 .7a11.5 11.5 0 0 0-3.64 22.4c.58.1.79-.25.79-.56v-2.23c-3.23.7-3.91-1.37-3.91-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.71.08-.71 1.17.08 1.78 1.2 1.78 1.2 1.04 1.78 2.72 1.26 3.39.96.1-.75.4-1.27.74-1.56-2.58-.3-5.29-1.29-5.29-5.69 0-1.26.45-2.28 1.19-3.09-.12-.3-.52-1.47.11-3.05 0 0 .97-.31 3.16 1.18a10.96 10.96 0 0 1 5.76 0c2.19-1.49 3.16-1.18 3.16-1.18.63 1.58.23 2.75.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.42-2.72 5.38-5.3 5.67.42.36.79 1.07.79 2.16v3.2c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .7Z" />
+        </svg>
+        <span>GitHub</span>
+      </a>
+    </header>
+
+    <main>
+      <section class="hero" id="top">
+        <div class="hero-glow hero-glow-cyan"></div>
+        <div class="hero-glow hero-glow-violet"></div>
+
+        <div class="hero-copy">
+          <p class="eyebrow">Memory infrastructure for AI</p>
+          <h1>Memory that moves at <span>thought speed.</span></h1>
+          <p class="hero-description">
+            A Rust-backed memory engine for Python AI assistants. Get
+            <strong>1–10 ms in-RAM recall</strong>, durable SQL persistence,
+            and zero required services.
+          </p>
+
+          <div class="hero-actions">
+            <a
+              class="button button-primary"
+              href="https://github.com/Magic-Man-us/MemoryCore"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Explore on GitHub
+            </a>
+            <a class="button button-secondary" href="#architecture">
+              See the architecture <span aria-hidden="true">↓</span>
+            </a>
+          </div>
+
+          <ul class="proof-list" aria-label="Project highlights">
+            <li><span class="proof-icon" aria-hidden="true">&lt;/&gt;</span> Rust + Python</li>
+            <li><span class="proof-icon database-icon" aria-hidden="true"></span> SQLite by default</li>
+            <li><span class="proof-icon shield-icon" aria-hidden="true">✓</span> MIT Licensed</li>
+          </ul>
+        </div>
+
+        <div
+          class="hero-visual"
+          aria-label="Three memory layers flowing into a unified neural memory core"
+        >
+          <div class="orbit orbit-one"></div>
+          <div class="orbit orbit-two"></div>
+          <img class="hero-art" src="./hero-brain.webp" alt="" />
+
+          <div class="memory-label memory-working">
+            <span>Working memory</span>
+            <small>Ephemeral · sub-second</small>
+          </div>
+          <div class="memory-label memory-short">
+            <span>Short-term</span>
+            <small>Recent · seconds → hours</small>
+          </div>
+          <div class="memory-label memory-long">
+            <span>Long-term</span>
+            <small>Durable · days → years</small>
+          </div>
+          <div class="core-label">
+            <span>Unified memory core</span>
+            <strong>Neural recall · 1–10 ms</strong>
+          </div>
+        </div>
+
+        <a class="scroll-cue" href="#architecture">
+          <span>Explore the system</span><i aria-hidden="true">↓</i>
+        </a>
+      </section>
+
+      <section class="architecture-section" id="architecture">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">One system. Three memory horizons.</p>
+            <h2>Fast where it matters. Durable where it counts.</h2>
+          </div>
+          <p>
+            Every query stays on the Rust-backed in-memory index. SQL handles
+            durability quietly in the background, while short-term and working
+            memory keep immediate context close.
+          </p>
+        </div>
+
+        <div class="architecture-map">
+          <article class="memory-card memory-card-working">
+            <div class="card-orb"></div>
+            <p>01 · Session context</p>
+            <h3>Working memory</h3>
+            <span>Rolling events with configurable TTL and per-user caps.</span>
+            <ul>
+              <li>Ephemeral session state</li>
+              <li>Automatic pruning</li>
+            </ul>
+          </article>
+
+          <article class="memory-card memory-card-short">
+            <div class="card-orb"></div>
+            <p>02 · Recent context</p>
+            <h3>Short-term memory</h3>
+            <span>TTL-managed traces for what matters right now.</span>
+            <ul>
+              <li>15-minute default TTL</li>
+              <li>Optional by configuration</li>
+            </ul>
+          </article>
+
+          <article class="memory-card memory-card-long">
+            <div class="card-orb"></div>
+            <p>03 · Durable recall</p>
+            <h3>Long-term memory</h3>
+            <span>Persistent traces and embeddings that survive restarts.</span>
+            <ul>
+              <li>SQLite or PostgreSQL</li>
+              <li>Hydrates directly to RAM</li>
+            </ul>
+          </article>
+
+          <div class="map-connector" aria-hidden="true"><i></i><i></i><i></i></div>
+
+          <article class="index-card">
+            <div class="index-rings" aria-hidden="true">
+              <i></i><i></i><i></i><b></b>
+            </div>
+            <div>
+              <p>RustMemoryIndex</p>
+              <h3>Recall in 1–10 ms</h3>
+              <span>
+                Cosine similarity over an in-RAM vector index. No database
+                round-trip on the critical path.
+              </span>
+            </div>
+            <dl>
+              <div><dt>Query path</dt><dd>RAM only</dd></div>
+              <div><dt>Persistence</dt><dd>One SQL database</dd></div>
+              <div><dt>Runtime</dt><dd>Async-safe</dd></div>
+            </dl>
+          </article>
+        </div>
+      </section>
+
+      <section class="performance-section" id="performance">
+        <div class="performance-copy">
+          <p class="section-kicker">Built for the hot path</p>
+          <h2>Database durability without database latency.</h2>
+          <p>
+            MemoryCore splits persistence from retrieval. Writes update SQL and
+            the index together. Reads stay in RAM. Store I/O runs in a worker
+            thread, so your async event loop stays responsive.
+          </p>
+
+          <div class="metric-grid">
+            <div><strong>1–10<span> ms</span></strong><p>Typical in-memory recall</p></div>
+            <div><strong>0</strong><p>Required external services</p></div>
+            <div><strong>64<span>-bit</span></strong><p>Structured memory key</p></div>
+            <div><strong>3</strong><p>Integrated memory layers</p></div>
+          </div>
+        </div>
+
+        <div class="query-trace" aria-label="MemoryCore request lifecycle">
+          <div class="trace-header">
+            <span>Live request trace</span>
+            <i><b></b> index healthy</i>
+          </div>
+          <ol>
+            <li>
+              <span class="trace-time">0.0 ms</span>
+              <div><strong>receive</strong><small>query + user_id</small></div>
+              <i>✓</i>
+            </li>
+            <li>
+              <span class="trace-time">0.7 ms</span>
+              <div><strong>embed</strong><small>vector ready</small></div>
+              <i>✓</i>
+            </li>
+            <li class="trace-active">
+              <span class="trace-time">4.2 ms</span>
+              <div><strong>recall</strong><small>Rust vector index</small></div>
+              <i>5 hits</i>
+            </li>
+            <li>
+              <span class="trace-time">6.8 ms</span>
+              <div><strong>return</strong><small>ranked memories</small></div>
+              <i>✓</i>
+            </li>
+          </ol>
+          <div class="trace-footer"><span>Total latency</span><strong>6.8 ms</strong></div>
+        </div>
+      </section>
+
+      <section class="quickstart-section" id="quickstart">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Pythonic by design</p>
+            <h2>From zero to durable memory in a few lines.</h2>
+          </div>
+          <p>
+            SQLite ships with Python and the schema creates itself. Bring an
+            embedder—or pass vectors directly—and start remembering.
+          </p>
+        </div>
+
+        <div class="code-shell">
+          <div class="code-topbar">
+            <div><i></i><i></i><i></i></div>
+            <span>quickstart.py</span>
+            <span>Python 3.12+</span>
+          </div>
+          <pre><code><span class="code-keyword">from</span> memory_core <span class="code-keyword">import</span> build_memory_system
+
+system = build_memory_system()
+
+<span class="code-keyword">await</span> system.remember(
+    user_id=<span class="code-string">"alice"</span>,
+    summary=<span class="code-string">"Prefers Python for scripting tasks"</span>,
+    importance=<span class="code-number">0.8</span>,
+    tags=[<span class="code-string">"preferences"</span>, <span class="code-string">"programming"</span>],
+    embedding=my_vector,
+)
+
+result = <span class="code-keyword">await</span> system.recall(
+    user_id=<span class="code-string">"alice"</span>,
+    query_text=<span class="code-string">"programming languages"</span>,
+    query_embedding=query_vector,
+    limit=<span class="code-number">5</span>,
+)</code></pre>
+          <div class="code-status">
+            <span><i></i> persisted to SQLite</span>
+            <span><i></i> Rust index updated</span>
+            <strong>ready to recall</strong>
+          </div>
+        </div>
+
+        <div class="feature-grid">
+          <article>
+            <span class="feature-number">01</span>
+            <h3>Bring your embedder</h3>
+            <p>
+              Implement one async protocol and use raw text everywhere.
+              MemoryCore handles vector generation at the boundary.
+            </p>
+          </article>
+          <article>
+            <span class="feature-number">02</span>
+            <h3>Filter before similarity</h3>
+            <p>
+              The optional SMK assistant index packs topic, kind, tools,
+              difficulty, generality, and importance into a 64-bit key.
+            </p>
+          </article>
+          <article>
+            <span class="feature-number">03</span>
+            <h3>Swap persistence later</h3>
+            <p>
+              Start locally with SQLite. Point one URL at PostgreSQL when the
+              application grows—without changing the memory API.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="final-cta">
+        <div class="cta-orbit" aria-hidden="true"><i></i><i></i><b></b></div>
+        <p class="section-kicker">Give your assistant continuity</p>
+        <h2>Memory should feel instant.<br />Now it can.</h2>
+        <p>
+          Open source, MIT licensed, and designed for the Python applications
+          you already build.
+        </p>
+        <div class="hero-actions">
+          <a
+            class="button button-primary"
+            href="https://github.com/Magic-Man-us/MemoryCore"
+            target="_blank"
+            rel="noreferrer"
+          >Explore MemoryCore</a>
+          <a
+            class="button button-secondary"
+            href="https://github.com/Magic-Man-us/MemoryCore#installation"
+            target="_blank"
+            rel="noreferrer"
+          >Installation guide ↗</a>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <a class="brand" href="#top" aria-label="Back to the top">
+        <svg class="memory-mark" aria-hidden="true" viewBox="0 0 48 48" fill="none">
+          <path d="M7 13.2 15.5 8 24 13.2 32.5 8 41 13.2v21.6L32.5 40 24 34.8 15.5 40 7 34.8V13.2Z" />
+          <path d="m14 18 10 6 10-6M24 24v10" />
+        </svg>
+        <span>MemoryCore</span>
+      </a>
+      <p>Rust-backed memory infrastructure for Python AI assistants.</p>
+      <div>
+        <a href="https://github.com/Magic-Man-us/MemoryCore">GitHub</a>
+        <a href="https://github.com/Magic-Man-us/MemoryCore/blob/main/README.md">Documentation</a>
+        <a href="https://github.com/Magic-Man-us/MemoryCore/blob/main/LICENSE">MIT License</a>
+      </div>
+    </footer>
+  </body>
+</html>
