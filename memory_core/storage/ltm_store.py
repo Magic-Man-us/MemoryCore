@@ -26,6 +26,10 @@ class LongTermStore:
     def __init__(self, db: Database) -> None:
         self._db = db
 
+    @property
+    def db(self) -> Database:
+        return self._db
+
     def upsert_trace(
         self,
         trace: MemoryTrace,

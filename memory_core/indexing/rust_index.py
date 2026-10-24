@@ -58,6 +58,16 @@ class RustMemoryIndex:
     def __len__(self) -> int:
         return len(self._engine)
 
+    def check_embedding(self, embedding: list[float]) -> None:
+        """Raise ValueError if ``ingest`` would reject this embedding."""
+        if not embedding:
+            raise ValueError("embedding cannot be empty")
+        dim = self._engine.embedding_dim
+        if dim is not None and len(embedding) != dim:
+            raise ValueError(
+                f"embedding dimension mismatch: expected {dim}, got {len(embedding)}"
+            )
+
     def ingest(self, trace: MemoryTrace, embedding: Iterable[float]) -> None:
         """Insert or replace a trace + embedding pair in the Rust engine."""
         self._engine.ingest_trace(*trace.to_rust_args(), list(embedding))

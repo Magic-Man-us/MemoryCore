@@ -58,21 +58,31 @@ in `ltm_traces`, so counts survive restarts), and attaches the STM/WM sidebands.
 
 ```mermaid
 flowchart LR
-    M[remember] --> Rust[RustMemoryIndex<br>validates first]
-    Rust --> DB[(ltm_traces)]
-    DB --> STM[(stm_traces)]
-    DB --> WM[(wm_events)]
+    M[remember] --> V{check_embedding}
+    V --> DB[(ltm_traces)]
+    DB --> Rust[RustMemoryIndex<br>publish]
+    Rust --> STM[(stm_traces)]
+    Rust --> WM[(wm_events)]
 ```
 
-The index ingests first because it validates the embedding: input it would reject never
-reaches the database (where it would break every later hydrate). If the LTM write fails,
-the index entry is rolled back. LTM is the source of truth; the index mirrors it.
+Validate, persist, publish. The embedding is checked against the index before anything
+is written, so input it would reject never reaches the database (where it would break
+every later hydrate). The trace is published to the index only once durable, so a
+concurrent recall can never see (or count an access on) an unpersisted trace; if the
+publish still fails, the new LTM row is deleted. A failed LTM write leaves the index
+untouched. `remember_assistant` follows the same order (`AssistantMemoryIndex.prepare`
+validates dimension, SMK fields, and id collisions) under a per-system lock, so
+concurrent upserts of one uid cannot leave the index and store disagreeing, and a failed
+store write keeps the previous version searchable. LTM is the source of truth; the index
+mirrors it.
 
 ### Forget
 
 `forget(trace_uid)` removes the trace from the index (its memory is freed, not
-tombstoned), deletes it from `ltm_traces` and `stm_traces`, and deletes every
-`wm_events` row linked to it. `forget_assistant(trace_uid)` does the same for the SMK
+tombstoned), deletes it from `ltm_traces` and `stm_traces` (even when STM is disabled
+on this system, since another process may have written it), and deletes every
+`wm_events` row linked to it. The migration that added `wm_events.trace_uid` backfills
+links for events written before it. `forget_assistant(trace_uid)` does the same for the SMK
 index and `assistant_traces`.
 
 ### SMK query pipeline

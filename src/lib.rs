@@ -535,9 +535,51 @@ impl PyMemoryEngine {
     pub fn __len__(&self, py: Python<'_>) -> usize {
         py.detach(|| read_lock(&self.inner).len())
     }
+
+    /// The embedding dimension fixed by the first ingest, or None before it.
+    /// Lets callers validate a vector before persisting anything.
+    #[getter]
+    pub fn embedding_dim(&self, py: Python<'_>) -> Option<usize> {
+        py.detach(|| read_lock(&self.inner).embedding_dim)
+    }
 }
 
 // --- Python bindings: assistant (SMK) index -----------------------------------
+
+/// Validate SMK fields and pack them into a key (ValueError on an invalid value).
+fn build_key(
+    topic: u8,
+    kind: u8,
+    tool_mask: u16,
+    difficulty: u8,
+    generality: u8,
+    importance: u8,
+) -> PyResult<StructuredMemoryKey> {
+    Ok(StructuredMemoryKey::new(
+        validate_topic(topic).map_err(PyValueError::new_err)?,
+        MemoryKind::try_from(kind).map_err(PyValueError::new_err)?,
+        tool_mask,
+        Level2Bits::try_from(difficulty).map_err(PyValueError::new_err)?,
+        Level2Bits::try_from(generality).map_err(PyValueError::new_err)?,
+        Level2Bits::try_from(importance).map_err(PyValueError::new_err)?,
+    ))
+}
+
+/// Pack SMK fields into the raw 64-bit key without touching any index.
+///
+/// The single source of truth for the bit layout; raises ValueError on an
+/// invalid discriminant, so it doubles as pre-persistence validation.
+#[pyfunction]
+pub fn pack_smk(
+    topic: u8,
+    kind: u8,
+    tool_mask: u16,
+    difficulty: u8,
+    generality: u8,
+    importance: u8,
+) -> PyResult<u64> {
+    build_key(topic, kind, tool_mask, difficulty, generality, importance).map(|k| k.raw())
+}
 
 #[pyclass(frozen, module = "memory_core._native")]
 pub struct PySmkQuery {
@@ -633,14 +675,7 @@ impl PyAssistantMemoryIndex {
         importance: u8,
         embedding: Vec<f32>,
     ) -> PyResult<u64> {
-        let smk = StructuredMemoryKey::new(
-            validate_topic(topic).map_err(PyValueError::new_err)?,
-            MemoryKind::try_from(kind).map_err(PyValueError::new_err)?,
-            tool_mask,
-            Level2Bits::try_from(difficulty).map_err(PyValueError::new_err)?,
-            Level2Bits::try_from(generality).map_err(PyValueError::new_err)?,
-            Level2Bits::try_from(importance).map_err(PyValueError::new_err)?,
-        );
+        let smk = build_key(topic, kind, tool_mask, difficulty, generality, importance)?;
         let entry = SmkEntry { id, embedding, smk };
         py.detach(|| write_lock(&self.inner).upsert(entry))
             .map(|_| smk.raw())
@@ -686,6 +721,7 @@ fn _native(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // assistant "brain" index
     m.add_class::<PyAssistantMemoryIndex>()?;
     m.add_class::<PySmkQuery>()?;
+    m.add_function(wrap_pyfunction!(pack_smk, m)?)?;
 
     Ok(())
 }

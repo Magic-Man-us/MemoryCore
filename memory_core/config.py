@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from memory_core.core.models import ScoringWeights
@@ -50,8 +50,13 @@ class MemoryCoreSettings(BaseSettings):
         env_prefix="MEMORY_CORE_", env_nested_delimiter="__", extra="ignore"
     )
 
-    @model_validator(mode="after")
-    def _assistant_dim_required(self) -> MemoryCoreSettings:
+    def require_complete(self) -> MemoryCoreSettings:
+        """Cross-field checks, run once every source (env, settings, overrides) is merged.
+
+        Not a model validator on purpose: an env-only base must be constructible
+        while an explicit override is still on its way (e.g. env enables the
+        assistant index and the dimension arrives as an override).
+        """
         if self.enable_assistant_index and self.assistant_index_dim is None:
             raise ValueError(
                 "assistant_index_dim must be provided when enable_assistant_index is True"
@@ -106,7 +111,7 @@ def resolve_settings(
             nested["sqlite_path"] = None
         data[key] = {**data[key], **nested}
 
-    return MemoryCoreSettings.model_validate(data)
+    return MemoryCoreSettings.model_validate(data).require_complete()
 
 
 def build_memory_system(
@@ -148,7 +153,7 @@ def build_memory_system(
     assistant_store = None
     if resolved.enable_assistant_index:
         dim = resolved.assistant_index_dim
-        if dim is None:  # unreachable: enforced by MemoryCoreSettings' validator
+        if dim is None:  # unreachable: enforced by require_complete()
             raise ValueError("assistant_index_dim is required")
         assistant_index = AssistantMemoryIndex(dim=dim)
         assistant_store = AssistantStore(database)

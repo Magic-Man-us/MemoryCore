@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from memory_core._native import PyAssistantMemoryIndex, PySmkQuery
+from memory_core._native import PyAssistantMemoryIndex, PySmkQuery, pack_smk
 from memory_core.types.smk_features import build_smk_features
 
 if TYPE_CHECKING:
@@ -59,6 +59,35 @@ class AssistantMemoryIndex:
 
     def __len__(self) -> int:
         return len(self._inner)
+
+    def prepare(self, trace: AssistantMemoryTrace, embedding: Iterable[float]) -> list[float]:
+        """Validate a trace + embedding for ingest without touching the index.
+
+        Checks the dimension, packs (and so validates) the SMK, and checks for an
+        id collision. Sets ``trace.smk_raw`` and returns the embedding as a list, so
+        callers can persist first and publish to the index only once durable.
+        """
+        emb = list(embedding)
+        if len(emb) != self.dim:
+            raise ValueError(
+                f"embedding dimension mismatch: expected {self.dim}, got {len(emb)}"
+            )
+        smk = build_smk_features(trace)
+        smk_raw = pack_smk(
+            int(smk.topic),
+            int(smk.kind),
+            int(smk.tool_mask),
+            int(smk.difficulty),
+            int(smk.generality),
+            int(smk.importance),
+        )
+        mem_id = stable_memory_id(trace.trace_uid)
+        with self._lock:
+            owner = self._id_to_uid.get(mem_id)
+        if owner is not None and owner != trace.trace_uid:
+            raise ValueError(f"assistant index id collision: {trace.trace_uid!r} vs {owner!r}")
+        trace.smk_raw = smk_raw
+        return emb
 
     def ingest(self, trace: AssistantMemoryTrace, embedding: Iterable[float]) -> int:
         """Insert or replace a trace; sets and returns ``trace.smk_raw``.
@@ -122,8 +151,11 @@ class AssistantMemoryIndex:
 
         hits = self._inner.query_top_k_filtered(list(query_embedding), k, smk_q)
         with self._lock:
-            uids = [self._id_to_uid.get(mem_id, str(mem_id)) for mem_id, _, _ in hits]
+            uids = [self._id_to_uid.get(mem_id) for mem_id, _, _ in hits]
+        # A uid missing here was removed between the native query and this lookup:
+        # drop the hit rather than surface a bare numeric id.
         return [
             AssistantMemoryHit(trace_uid=uid, score=float(score), smk_raw=int(smk_raw))
             for uid, (_, score, smk_raw) in zip(uids, hits, strict=True)
+            if uid is not None
         ]

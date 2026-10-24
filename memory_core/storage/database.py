@@ -11,6 +11,7 @@ datetime comparisons stay consistent with what was written.
 
 from __future__ import annotations
 
+import json
 import threading
 from contextlib import contextmanager, nullcontext
 from datetime import datetime  # noqa: TC003 — runtime-required by Mapped[] resolution
@@ -33,9 +34,9 @@ from sqlalchemy.pool import StaticPool
 from .settings import SQLITE_MEMORY, DatabaseSettings
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
-    from sqlalchemy.engine import URL, Engine
+    from sqlalchemy.engine import URL, Connection, Engine
 
 
 class Base(DeclarativeBase):
@@ -110,6 +111,24 @@ class AssistantTraceORM(Base):
     embedding: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
 
 
+def _backfill_wm_trace_uids(connection: Connection) -> None:
+    """Link pre-existing working-memory events to their trace, so ``forget`` purges
+    events written before the ``trace_uid`` column existed."""
+    rows = connection.execute(
+        text("SELECT id, payload FROM wm_events WHERE trace_uid IS NULL")
+    ).all()
+    updates = []
+    for row_id, payload in rows:
+        try:
+            uid = json.loads(payload).get("trace_uid")
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            continue
+        if isinstance(uid, str):
+            updates.append({"id": row_id, "uid": uid})
+    if updates:
+        connection.execute(text("UPDATE wm_events SET trace_uid = :uid WHERE id = :id"), updates)
+
+
 def _is_sqlite_memory(url: URL) -> bool:
     database = url.database
     return (
@@ -169,6 +188,10 @@ class Database:
         ("ltm_traces", "extra", "TEXT"),
         ("wm_events", "trace_uid", "TEXT"),
     )
+    # Data fix-ups run in the same transaction as the column they follow.
+    _BACKFILLS: dict[tuple[str, str], Callable[[Connection], None]] = {
+        ("wm_events", "trace_uid"): _backfill_wm_trace_uids,
+    }
 
     def create_schema(self) -> None:
         """Create missing tables and add later-introduced columns. Idempotent."""
@@ -185,6 +208,9 @@ class Database:
                         connection.execute(
                             text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}")
                         )
+                        backfill = self._BACKFILLS.get((table, column))
+                        if backfill is not None:
+                            backfill(connection)
 
     def session(self) -> Session:
         """A new session; callers own commit/close. Prefer :meth:`session_scope`."""

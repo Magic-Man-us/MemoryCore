@@ -38,9 +38,10 @@ graph TB
   Rust index; `await system.hydrate_assistant()` does the same for the SMK index.
 - **Query**: `recall` searches the in-RAM index only, then bumps each hit's access count
   (in RAM and in the database) and attaches the STM/WM sidebands.
-- **Write**: `remember` validates against the index first, then persists. Input the index
-  would reject (a wrong embedding dimension) never reaches the database, and a failed
-  database write rolls the index entry back.
+- **Write**: `remember` validates, persists, then publishes to the index. Input the index
+  would reject (a wrong embedding dimension) never reaches the database, a failed
+  database write leaves the index untouched, and a trace is never searchable before it
+  is durable. Assistant writes follow the same order, serialized per system.
 - **Forget**: `forget(trace_uid)` removes the trace from the index (freeing its memory),
   LTM, STM, and any working-memory events linked to it.
 

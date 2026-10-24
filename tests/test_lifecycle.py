@@ -3,6 +3,7 @@ and persistence of the SMK assistant index."""
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -269,3 +270,105 @@ class TestAssistantMemory:
         with pytest.raises(ValueError, match="dimension mismatch"):
             await system.remember_assistant(trace=make_assistant_trace(), embedding=[1.0])
         assert system.assistant_store.fetch_all() == []
+
+
+class TestReviewRegressions:
+    """PR #17 review findings: write ordering, forget across config, concurrency."""
+
+    async def test_trace_is_durable_before_it_is_searchable(self, system, monkeypatch):
+        original = system.memory_index.ingest
+        seen_in_ltm: list[bool] = []
+
+        def spy(trace, embedding):
+            rows = system.ltm_store.fetch_traces_for_user(trace.user_id)
+            seen_in_ltm.append(any(t.trace_uid == trace.trace_uid for t, _ in rows))
+            original(trace, embedding)
+
+        monkeypatch.setattr(system.memory_index, "ingest", spy)
+        await system.remember(user_id="alice", summary="x", importance=0.5, tags=[])
+        assert seen_in_ltm == [True]
+
+    async def test_index_rejection_after_persist_removes_the_row(self, system, monkeypatch):
+        def reject(*_args, **_kwargs):
+            raise ValueError("embedding dimension mismatch: raced")
+
+        monkeypatch.setattr(system.memory_index, "ingest", reject)
+        with pytest.raises(ValueError, match="raced"):
+            await system.remember(user_id="alice", summary="x", importance=0.5, tags=[])
+        assert system.ltm_store.fetch_traces_for_user("alice") == []
+
+    async def test_forget_clears_stm_written_while_stm_was_enabled(self, system, db):
+        trace = await system.remember(user_id="alice", summary="secret", importance=0.5,
+                                      tags=[])
+        stm_off = MemorySystem(
+            memory_index=RustMemoryIndex(),
+            working_mem=system.working_mem,
+            ltm_store=system.ltm_store,
+            embedder=system.embedder,
+        )
+        assert await stm_off.forget(trace.trace_uid) is True
+        result = await system.recall(user_id="alice", query_text="secret", limit=5)
+        assert result.stm_traces == []
+
+    async def test_hydrate_assistant_is_zero_when_disabled(self, tmp_path):
+        system = build_memory_system(sqlite_path=tmp_path / "x.db")
+        assert await system.hydrate_assistant() == 0
+
+    async def test_failed_store_write_keeps_previous_version_searchable(
+        self, tmp_path, monkeypatch
+    ):
+        system = _assistant_system(tmp_path)
+        await system.remember_assistant(trace=make_assistant_trace(trace_uid="p-1"),
+                                        embedding=_vec(0))
+
+        def boom(*_args, **_kwargs):
+            raise RuntimeError("disk full")
+
+        monkeypatch.setattr(system.assistant_store, "upsert_trace", boom)
+        with pytest.raises(RuntimeError, match="disk full"):
+            await system.remember_assistant(
+                trace=make_assistant_trace(trace_uid="p-1", summary="v2"), embedding=_vec(1)
+            )
+        [hit] = await system.recall_assistant(k=5, query_embedding=_vec(0))
+        assert hit.trace_uid == "p-1"
+        assert hit.score == pytest.approx(1.0, abs=1e-5)
+
+    async def test_concurrent_upserts_of_one_uid_leave_index_and_store_agreeing(
+        self, tmp_path, monkeypatch
+    ):
+        import time
+
+        system = _assistant_system(tmp_path)
+        original = system.assistant_index.ingest
+
+        def slow_for_v1(trace, embedding):
+            if trace.summary == "v1":
+                time.sleep(0.2)
+            return original(trace, embedding)
+
+        monkeypatch.setattr(system.assistant_index, "ingest", slow_for_v1)
+
+        async def second():
+            await asyncio.sleep(0.05)
+            await system.remember_assistant(
+                trace=make_assistant_trace(trace_uid="p-1", summary="v2"), embedding=_vec(2)
+            )
+
+        await asyncio.gather(
+            system.remember_assistant(
+                trace=make_assistant_trace(trace_uid="p-1", summary="v1"), embedding=_vec(1)
+            ),
+            second(),
+        )
+        [(stored, stored_emb)] = system.assistant_store.fetch_all()
+        [hit] = await system.recall_assistant(k=1, query_embedding=stored_emb)
+        assert stored.summary == "v2"
+        assert hit.score == pytest.approx(1.0, abs=1e-5), "index holds the stored version"
+
+    def test_query_drops_hits_removed_mid_query(self):
+        from memory_core import AssistantMemoryIndex
+
+        index = AssistantMemoryIndex(dim=DIM)
+        index.ingest(make_assistant_trace(trace_uid="p-1"), _vec(0))
+        index._id_to_uid.clear()  # what a concurrent remove() leaves behind
+        assert index.query(_vec(0), k=5) == []

@@ -73,3 +73,15 @@ def test_settings_instance_plus_overrides(tmp_path):
     assert resolved.scoring.recency == 0.1
     assert resolved.scoring.semantic == 0.7
     assert resolved.db.sqlite_path == str(tmp_path / "t.db")
+
+
+def test_env_enabled_assistant_index_takes_dim_from_overrides(tmp_path, monkeypatch):
+    """PR #17 review: the env-only base must not fail before overrides apply."""
+    monkeypatch.setenv("MEMORY_CORE_ENABLE_ASSISTANT_INDEX", "true")
+    monkeypatch.delenv("MEMORY_CORE_ASSISTANT_INDEX_DIM", raising=False)
+    system = build_memory_system(sqlite_path=tmp_path / "t.db",
+                                 overrides={"assistant_index_dim": 8})
+    assert system.assistant_index is not None and system.assistant_index.dim == 8
+    disabled = build_memory_system(sqlite_path=tmp_path / "t.db",
+                                   overrides={"enable_assistant_index": False})
+    assert disabled.assistant_index is None

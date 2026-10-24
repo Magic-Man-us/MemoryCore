@@ -17,6 +17,14 @@ class MemoryIndex(Protocol):
     relevant memories given a query embedding and simple filters.
     """
 
+    def check_embedding(self, embedding: list[float]) -> None:
+        """Raise ValueError if ``ingest`` would reject this embedding.
+
+        Called before anything is persisted, so input the index would reject never
+        reaches the database.
+        """
+        ...
+
     def ingest(self, trace: MemoryTrace, embedding: Iterable[float]) -> None:
         """Store or update a trace in the index."""
         ...

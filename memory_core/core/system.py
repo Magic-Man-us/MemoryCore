@@ -5,14 +5,16 @@ call here runs in a worker thread (``asyncio.to_thread``) so the caller's event 
 (a streaming assistant turn) never blocks on database I/O or vector search.
 
 Consistency rule: LTM (and the assistant store) is the source of truth and the
-in-RAM indexes mirror it. Writes validate against the index first, so input the
-index would reject (wrong embedding dimension) is never persisted, and a failed
-persist rolls the index entry back.
+in-RAM indexes mirror it. Writes validate first, persist second, and publish to the
+index last: input the index would reject (a wrong embedding dimension) is never
+persisted, a failed persist leaves the index untouched (including the previous
+version of an updated trace), and a trace is never searchable before it is durable.
 """
 
 from __future__ import annotations
 
 import asyncio
+import threading
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -66,6 +68,9 @@ class MemorySystem:
         self.assistant_store = assistant_store
         self.stm_store = stm_store
         self._stm_ttl_seconds = stm_ttl_seconds
+        # Serializes each assistant write (validate, persist, publish) so two
+        # concurrent upserts of one uid cannot leave the index and store disagreeing.
+        self._assistant_lock = threading.Lock()
 
     # --- Startup -----------------------------------------------------------
 
@@ -90,19 +95,21 @@ class MemorySystem:
     async def hydrate_assistant(self) -> int:
         """Load every persisted assistant trace into the SMK index.
 
-        Returns the number ingested; 0 when no assistant store is configured.
+        Returns the number ingested; 0 when the assistant index or store is not
+        configured (like ``recall_assistant``, reads never raise for a disabled index).
         """
-        index = self._require_assistant_index()
+        index = self.assistant_index
         store = self.assistant_store
-        if store is None:
+        if index is None or store is None:
             return 0
 
         def _load() -> int:
             loaded = 0
-            for trace, embedding in store.fetch_all():
-                if embedding:
-                    index.ingest(trace, embedding)
-                    loaded += 1
+            with self._assistant_lock:
+                for trace, embedding in store.fetch_all():
+                    if embedding:
+                        index.ingest(trace, embedding)
+                        loaded += 1
             return loaded
 
         return await asyncio.to_thread(_load)
@@ -142,13 +149,16 @@ class MemorySystem:
         emb_list = await self._resolve_embedding(embedding, f"{summary}\n{content}".strip())
 
         def _persist() -> None:
-            # Index first: it validates the embedding, so a rejected write never
-            # reaches LTM (where it would break every later hydrate).
-            self.memory_index.ingest(trace, emb_list)
+            # Validate, persist, then publish: a rejected embedding never reaches
+            # LTM (where it would break every later hydrate), and a concurrent
+            # recall cannot see (and count an access on) a trace not yet durable.
+            self.memory_index.check_embedding(emb_list)
+            self.ltm_store.upsert_trace(trace, embedding=emb_list)
             try:
-                self.ltm_store.upsert_trace(trace, embedding=emb_list)
+                self.memory_index.ingest(trace, emb_list)
             except BaseException:
-                self.memory_index.remove(trace.trace_uid)
+                # e.g. two concurrent first writes with different dimensions
+                self.ltm_store.delete_trace(trace.trace_uid)
                 raise
             if self.stm_store is not None:
                 expires_at = trace.created_at + timedelta(seconds=self._stm_ttl_seconds)
@@ -223,11 +233,17 @@ class MemorySystem:
         Returns True when LTM had the row.
         """
 
+        from memory_core.storage.stm_store import ShortTermStore
+
+        # STM rows are deleted even when STM is disabled on this system: they may
+        # have been written by a process that had it enabled, and would resurface
+        # if STM were turned back on before they expire.
+        stm_store = self.stm_store or ShortTermStore(self.ltm_store.db)
+
         def _forget() -> bool:
             self.memory_index.remove(trace_uid)
             deleted = self.ltm_store.delete_trace(trace_uid)
-            if self.stm_store is not None:
-                self.stm_store.delete_trace(trace_uid)
+            stm_store.delete_trace(trace_uid)
             self.working_mem.delete_for_trace(trace_uid)
             return deleted
 
@@ -260,10 +276,12 @@ class MemorySystem:
         trace: AssistantMemoryTrace,
         embedding: Iterable[float] | None = None,
     ) -> AssistantMemoryTrace:
-        """Index an assistant trace (upsert by ``trace_uid``) and persist it.
+        """Persist an assistant trace and index it (upsert by ``trace_uid``).
 
         Sets ``trace.smk_raw``. Raises RuntimeError when the assistant index is not
         enabled: silently dropping a write would lose what the assistant learned.
+        If persisting fails, the index (and any previous version of the trace in
+        it) is left untouched.
         """
         index = self._require_assistant_index()
         emb_list = await self._resolve_embedding(
@@ -271,14 +289,11 @@ class MemorySystem:
         )
 
         def _persist() -> None:
-            index.ingest(trace, emb_list)
-            if self.assistant_store is None:
-                return
-            try:
-                self.assistant_store.upsert_trace(trace, embedding=emb_list)
-            except BaseException:
-                index.remove(trace.trace_uid)
-                raise
+            with self._assistant_lock:
+                validated = index.prepare(trace, emb_list)
+                if self.assistant_store is not None:
+                    self.assistant_store.upsert_trace(trace, embedding=validated)
+                index.ingest(trace, validated)
 
         await asyncio.to_thread(_persist)
         return trace
@@ -288,10 +303,11 @@ class MemorySystem:
         index = self._require_assistant_index()
 
         def _forget() -> bool:
-            removed = index.remove(trace_uid)
-            if self.assistant_store is not None:
-                removed = self.assistant_store.delete_trace(trace_uid) or removed
-            return removed
+            with self._assistant_lock:
+                removed = index.remove(trace_uid)
+                if self.assistant_store is not None:
+                    removed = self.assistant_store.delete_trace(trace_uid) or removed
+                return removed
 
         return await asyncio.to_thread(_forget)
 

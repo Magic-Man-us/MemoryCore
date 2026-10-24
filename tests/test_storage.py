@@ -244,3 +244,50 @@ class TestAssistantStore:
         assert store.delete_trace("a-1") is True
         assert store.delete_trace("a-1") is False
         assert store.fetch_all() == []
+
+
+def test_wm_migration_backfills_trace_links_for_existing_events(tmp_path):
+    """PR #17 review: events written before the column existed must still be
+    purged by forget()."""
+    import json
+
+    from sqlalchemy import create_engine, text
+
+    from memory_core.storage import Database, DatabaseSettings
+
+    url = f"sqlite:///{tmp_path}/legacy_wm.db"
+    old_engine = create_engine(url)
+    with old_engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE wm_events (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "user_id VARCHAR NOT NULL, created_at DATETIME NOT NULL, "
+                "expires_at DATETIME NOT NULL, payload TEXT NOT NULL)"
+            )
+        )
+        future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+        for payload in (
+            {"kind": "ltm_trace", "trace_uid": "t-1", "summary": "secret"},
+            {"kind": "turn"},
+            {"kind": "odd", "trace_uid": 7},
+        ):
+            connection.execute(
+                text(
+                    "INSERT INTO wm_events (user_id, created_at, expires_at, payload) "
+                    "VALUES ('alice', :now, :exp, :payload)"
+                ),
+                {"now": datetime.now(UTC).isoformat(), "exp": future,
+                 "payload": json.dumps(payload)},
+            )
+        connection.execute(
+            text(
+                "INSERT INTO wm_events (user_id, created_at, expires_at, payload) "
+                "VALUES ('alice', :now, :exp, 'not json')"
+            ),
+            {"now": datetime.now(UTC).isoformat(), "exp": future},
+        )
+    old_engine.dispose()
+
+    upgraded = Database(settings=DatabaseSettings(url=url))
+    upgraded.create_schema()
+    assert SqlWorkingMemory(upgraded).delete_for_trace("t-1") == 1
