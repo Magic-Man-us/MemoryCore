@@ -33,12 +33,12 @@ class MemoryIndex(Protocol):
         """Search a user's memories; returns ranked candidates."""
         ...
 
-    def mark_accessed(self, trace_uid: str) -> None:
-        """Record that a trace has been accessed."""
+    def mark_accessed(self, trace_uid: str) -> bool:
+        """Record that a trace has been accessed. False when the trace is unknown."""
         ...
 
-    def remove(self, trace_uid: str) -> None:
-        """Remove a trace from the index."""
+    def remove(self, trace_uid: str) -> bool:
+        """Remove a trace from the index. False when the trace is unknown."""
         ...
 
 

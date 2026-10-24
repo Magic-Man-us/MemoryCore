@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 
 from memory_core.core.models import MemoryTrace
 
+from .codec import decode_embedding, decode_object, decode_tags, encode_embedding
 from .database import Database, LongTermTraceORM
 
 if TYPE_CHECKING:
@@ -31,11 +32,7 @@ class LongTermStore:
         embedding: Iterable[float] | None = None,
     ) -> None:
         """Persist the trace (metadata + content) and optional embedding vector."""
-        emb_bytes = None
-        if embedding is not None:
-            emb_bytes = json.dumps(list(embedding)).encode("utf-8")
-
-        # mode="json" coerces non-native values (datetimes, paths, …) the same way
+        # mode="json" coerces non-native values (datetimes, paths, ...) the same way
         # the STM store does, so one trace serializes identically in both stores.
         extra_json = trace.model_dump(mode="json", include={"extra"})["extra"]
 
@@ -49,43 +46,48 @@ class LongTermStore:
             access_count=trace.access_count,
             tags=json.dumps(sorted(trace.tags)),
             extra=json.dumps(extra_json) if extra_json else None,
-            embedding=emb_bytes,
+            embedding=encode_embedding(embedding),
         )
-        session = self._db.session()
-        try:
+        with self._db.session_scope() as session:
             session.merge(row)
             session.commit()
-        finally:
-            session.close()
 
     def fetch_traces_for_user(
         self,
         user_id: str,
     ) -> list[tuple[MemoryTrace, list[float] | None]]:
-        """All of a user's traces with their stored embeddings — the hydration read path."""
-        session = self._db.session()
-        try:
-            stmt = (
-                select(LongTermTraceORM)
-                .where(LongTermTraceORM.user_id == user_id)
-                .order_by(LongTermTraceORM.created_at)
-            )
+        """All of a user's traces with their stored embeddings: the hydration read path."""
+        stmt = (
+            select(LongTermTraceORM)
+            .where(LongTermTraceORM.user_id == user_id)
+            .order_by(LongTermTraceORM.created_at)
+        )
+        with self._db.session_scope() as session:
             rows = session.execute(stmt).scalars().all()
-            return [(self._row_to_trace(row), self._decode_embedding(row.embedding)) for row in rows]
-        finally:
-            session.close()
+            return [(self._row_to_trace(row), decode_embedding(row.embedding)) for row in rows]
+
+    def increment_access(self, trace_uids: Iterable[str]) -> int:
+        """Add one to ``access_count`` for each trace; returns the rows updated."""
+        uids = list(dict.fromkeys(trace_uids))
+        if not uids:
+            return 0
+        with self._db.session_scope() as session:
+            result = session.execute(
+                update(LongTermTraceORM)
+                .where(LongTermTraceORM.trace_uid.in_(uids))
+                .values(access_count=LongTermTraceORM.access_count + 1)
+            )
+            session.commit()
+            return int(result.rowcount or 0)
 
     def delete_trace(self, trace_uid: str) -> bool:
         """Remove a trace permanently. Returns True when a row was deleted."""
-        session = self._db.session()
-        try:
+        with self._db.session_scope() as session:
             result = session.execute(
                 delete(LongTermTraceORM).where(LongTermTraceORM.trace_uid == trace_uid)
             )
             session.commit()
             return bool(result.rowcount)
-        finally:
-            session.close()
 
     @staticmethod
     def _row_to_trace(row: LongTermTraceORM) -> MemoryTrace:
@@ -97,38 +99,6 @@ class LongTermStore:
             importance=row.importance,
             created_at=row.created_at,
             access_count=row.access_count,
-            tags=_decode_tags(row.tags),
-            extra=_decode_extra(row.extra),
+            tags=decode_tags(row.tags),
+            extra=decode_object(row.extra),
         )
-
-    @staticmethod
-    def _decode_embedding(raw: bytes | None) -> list[float] | None:
-        if not raw:
-            return None
-        try:
-            decoded = json.loads(raw.decode("utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return None
-        if isinstance(decoded, list):
-            return [float(x) for x in decoded]
-        return None
-
-
-def _decode_tags(raw_tags: str | None) -> set[str]:
-    if not raw_tags:
-        return set()
-    try:
-        tags = json.loads(raw_tags)
-    except json.JSONDecodeError:
-        return set()
-    return set(tags) if isinstance(tags, list) else set()
-
-
-def _decode_extra(raw_extra: str | None) -> dict[str, object]:
-    if not raw_extra:
-        return {}
-    try:
-        extra = json.loads(raw_extra)
-    except json.JSONDecodeError:
-        return {}
-    return extra if isinstance(extra, dict) else {}

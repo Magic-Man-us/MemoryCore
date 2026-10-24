@@ -21,8 +21,8 @@ from memory_core import (
 class PerUserMemoryManager:
     """Manage separate memory systems for each user over one shared database."""
 
-    def __init__(self, db_url: str = "sqlite:///example_memory.db") -> None:
-        self._db = Database(url=db_url)
+    def __init__(self, sqlite_path: str = "example_memory.db") -> None:
+        self._db = Database(sqlite_path=sqlite_path)
         self._db.create_schema()
         self._user_systems: dict[str, MemorySystem] = {}
 

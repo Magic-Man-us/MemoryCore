@@ -22,7 +22,7 @@ from memory_core.types.smk_types import MemoryKind, ToolFlag, TopicBucket  # noq
 class AssistantMemoryTrace(BaseModel):
     """Normalized record describing a single assistant-focused learning trace."""
 
-    model_config = ConfigDict(frozen=False, arbitrary_types_allowed=True)
+    model_config = ConfigDict(frozen=False)
 
     trace_uid: str
 
@@ -55,8 +55,8 @@ class AssistantMemoryTrace(BaseModel):
     access_count: int = 0
     extra: dict[str, Any] = Field(default_factory=dict)
 
-    # link to the compact SMK key (what Rust uses)
-    smk_raw: int | None = None  # 64-bit integer StructuredMemoryKey
+    # the packed 64-bit StructuredMemoryKey; set by the index on ingest
+    smk_raw: int | None = None
 
 
 class MemoryTrace(BaseModel):
@@ -96,13 +96,40 @@ class MemoryTrace(BaseModel):
 class MemoryCandidate(BaseModel):
     """Search result candidate produced by the Rust memory index."""
 
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
+    model_config = ConfigDict(frozen=True)
 
     trace_uid: str
     score: float
     summary: str
     tags: list[str]
     created_at: datetime
+    importance: float = 0.0
+    access_count: int = 0
+
+
+class ScoringWeights(BaseModel):
+    """Weights for the conversation-memory candidate score.
+
+    ``score = semantic * cosine + importance * importance
+    + recency * 0.5 ** (age / half_life) + access * a / (1 + a)``, with
+    ``a = ln(1 + access_count)``. The defaults are the original
+    ``0.7 * cosine + 0.3 * importance``: recency and access are opt-in.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    semantic: float = Field(default=0.7, ge=0.0, allow_inf_nan=False)
+    importance: float = Field(default=0.3, ge=0.0, allow_inf_nan=False)
+    recency: float = Field(default=0.0, ge=0.0, allow_inf_nan=False)
+    access: float = Field(default=0.0, ge=0.0, allow_inf_nan=False)
+    recency_half_life_days: float = Field(default=30.0, gt=0.0, allow_inf_nan=False)
+
+
+class PurgeResult(BaseModel):
+    """Rows removed by ``MemorySystem.purge_expired``."""
+
+    stm_traces: int = 0
+    wm_events: int = 0
 
 
 class RecallResult(BaseModel):

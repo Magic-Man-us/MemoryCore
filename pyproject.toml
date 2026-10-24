@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "memory_core"
-version = "0.2.0"
+version = "0.3.0"
 description = "Rust-backed memory engine for AI assistants: SQL persistence, in-RAM vector search"
 requires-python = ">=3.12"
 authors = [

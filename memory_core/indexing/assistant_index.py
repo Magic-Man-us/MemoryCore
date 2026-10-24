@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import threading
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
@@ -14,7 +15,12 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from memory_core.core.models import AssistantMemoryTrace
-    from memory_core.types.smk_types import Level2Bits, MemoryKind, ToolFlag, TopicBucket
+    from memory_core.types.smk_types import (
+        Level2Bits,
+        MemoryKind,
+        ToolFlag,
+        TopicBucket,
+    )
 
 
 def stable_memory_id(trace_uid: str) -> int:
@@ -35,29 +41,61 @@ class AssistantMemoryHit(BaseModel):
 
 
 class AssistantMemoryIndex:
-    """Wrapper around the Rust SMK assistant index."""
+    """Wrapper around the Rust SMK assistant index.
+
+    Ingest is an upsert keyed by ``trace_uid``: re-ingesting a trace replaces it.
+    The uid <-> id map is rebuilt from the assistant store on hydration, so it needs
+    no persistence of its own.
+    """
 
     def __init__(self, dim: int) -> None:
         self._inner = PyAssistantMemoryIndex(dim)
         self._id_to_uid: dict[int, str] = {}
+        self._lock = threading.Lock()
 
-    def ingest(self, trace: AssistantMemoryTrace, embedding: Iterable[float]) -> None:
+    @property
+    def dim(self) -> int:
+        return self._inner.dim
+
+    def __len__(self) -> int:
+        return len(self._inner)
+
+    def ingest(self, trace: AssistantMemoryTrace, embedding: Iterable[float]) -> int:
+        """Insert or replace a trace; sets and returns ``trace.smk_raw``.
+
+        Raises ValueError on a dimension mismatch or (astronomically unlikely) a
+        64-bit id collision with a different trace uid.
+        """
         smk = build_smk_features(trace)
-        emb = list(embedding)
-
         mem_id = stable_memory_id(trace.trace_uid)
-        self._id_to_uid[mem_id] = trace.trace_uid
+        with self._lock:
+            owner = self._id_to_uid.get(mem_id)
+            if owner is not None and owner != trace.trace_uid:
+                raise ValueError(
+                    f"assistant index id collision: {trace.trace_uid!r} vs {owner!r}"
+                )
+            smk_raw = self._inner.add(
+                id=mem_id,
+                topic=int(smk.topic),
+                kind=int(smk.kind),
+                tool_mask=int(smk.tool_mask),
+                difficulty=int(smk.difficulty),
+                generality=int(smk.generality),
+                importance=int(smk.importance),
+                embedding=list(embedding),
+            )
+            self._id_to_uid[mem_id] = trace.trace_uid
+        trace.smk_raw = smk_raw
+        return smk_raw
 
-        self._inner.add(
-            id=mem_id,
-            topic=int(smk.topic.value),
-            kind=int(smk.kind.value),
-            tool_mask=int(smk.tool_mask),
-            difficulty=int(smk.difficulty.value),
-            generality=int(smk.generality.value),
-            importance=int(smk.importance.value),
-            embedding=emb,
-        )
+    def remove(self, trace_uid: str) -> bool:
+        """Remove a trace. Returns False when it was not indexed."""
+        mem_id = stable_memory_id(trace_uid)
+        with self._lock:
+            if self._id_to_uid.get(mem_id) != trace_uid:
+                return False
+            del self._id_to_uid[mem_id]
+            return self._inner.remove(mem_id)
 
     def query(
         self,
@@ -71,32 +109,21 @@ class AssistantMemoryIndex:
         min_importance: Level2Bits | None = None,
     ) -> list[AssistantMemoryHit]:
         mask = 0
-        if required_tools:
-            for t in required_tools:
-                mask |= int(t)
-
-        kinds_raw = None
-        if allowed_kinds:
-            kinds_raw = [int(kind.value) for kind in allowed_kinds]
+        for tool in required_tools or ():
+            mask |= int(tool)
 
         smk_q = PySmkQuery(
-            topic=int(topic.value) if topic is not None else None,
+            topic=int(topic) if topic is not None else None,
             required_tools_mask=mask,
-            allowed_kinds=kinds_raw,
-            min_generality=int(min_generality.value) if min_generality else None,
-            min_importance=int(min_importance.value) if min_importance else None,
+            allowed_kinds=[int(kind) for kind in allowed_kinds] if allowed_kinds else None,
+            min_generality=int(min_generality) if min_generality is not None else None,
+            min_importance=int(min_importance) if min_importance is not None else None,
         )
 
         hits = self._inner.query_top_k_filtered(list(query_embedding), k, smk_q)
-
-        out: list[AssistantMemoryHit] = []
-        for mem_id, score, smk_raw in hits:
-            uid = self._id_to_uid.get(mem_id, str(mem_id))
-            out.append(
-                AssistantMemoryHit(
-                    trace_uid=uid,
-                    score=float(score),
-                    smk_raw=int(smk_raw),
-                )
-            )
-        return out
+        with self._lock:
+            uids = [self._id_to_uid.get(mem_id, str(mem_id)) for mem_id, _, _ in hits]
+        return [
+            AssistantMemoryHit(trace_uid=uid, score=float(score), smk_raw=int(smk_raw))
+            for uid, (_, score, smk_raw) in zip(uids, hits, strict=True)
+        ]
