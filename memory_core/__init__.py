@@ -1,10 +1,11 @@
-"""Memory Core — a multi-layered memory system with Rust-backed vector indexing.
+"""Memory Core: a multi-layered memory system with Rust-backed vector indexing.
 
-One SQL database (SQLite by default) persists long-term, short-term, and working
-memory; all runtime queries hit the in-RAM Rust index (``memory_core._native``).
+One SQL database (a local SQLite file by default) persists long-term, short-term,
+working, and assistant memory; all runtime queries hit the in-RAM Rust indexes
+(``memory_core._native``).
 """
 
-from .config import MemoryCoreSettings, build_memory_system
+from .config import MemoryCoreSettings, build_memory_system, resolve_settings
 from .core import (
     AssistantMemoryTrace,
     Embedder,
@@ -12,18 +13,22 @@ from .core import (
     MemoryIndex,
     MemorySystem,
     MemoryTrace,
+    PurgeResult,
     RecallResult,
+    ScoringWeights,
 )
 from .indexing import (
     AssistantMemoryIndex,
     RustMemoryIndex,
 )
 from .storage import (
+    AssistantStore,
     Database,
     DatabaseSettings,
     LongTermStore,
     ShortTermStore,
     SqlWorkingMemory,
+    sqlite_url,
 )
 from .types import (
     Level2Bits,
@@ -36,6 +41,7 @@ from .types import (
 __all__ = [
     "AssistantMemoryIndex",
     "AssistantMemoryTrace",
+    "AssistantStore",
     "Database",
     "DatabaseSettings",
     "Embedder",
@@ -47,12 +53,16 @@ __all__ = [
     "MemoryKind",
     "MemorySystem",
     "MemoryTrace",
+    "PurgeResult",
     "RecallResult",
     "RustMemoryIndex",
+    "ScoringWeights",
     "ShortTermStore",
     "SqlWorkingMemory",
     "ToolFlag",
     "TopicBucket",
     "build_memory_system",
     "build_smk_features",
+    "resolve_settings",
+    "sqlite_url",
 ]

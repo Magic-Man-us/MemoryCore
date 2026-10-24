@@ -11,14 +11,32 @@ datetime comparisons stay consistent with what was written.
 
 from __future__ import annotations
 
+import json
+import threading
+from contextlib import contextmanager, nullcontext
 from datetime import datetime  # noqa: TC003 — runtime-required by Mapped[] resolution
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import LargeBinary, Text, create_engine, event, inspect, text
-from sqlalchemy.engine import Engine
+from sqlalchemy import (
+    BigInteger,
+    LargeBinary,
+    Text,
+    create_engine,
+    event,
+    inspect,
+    make_url,
+    text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
+from sqlalchemy.pool import StaticPool
 
-from .settings import DatabaseSettings
+from .settings import SQLITE_MEMORY, DatabaseSettings
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
+
+    from sqlalchemy.engine import URL, Connection, Engine
 
 
 class Base(DeclarativeBase):
@@ -61,7 +79,11 @@ class ShortTermTraceORM(Base):
 
 
 class WorkingMemoryEventORM(Base):
-    """Rolling per-user session events with TTL expiry (``wm_events``)."""
+    """Rolling per-user session events with TTL expiry (``wm_events``).
+
+    ``trace_uid`` is set for events about a specific trace, so forgetting the trace
+    can purge them too.
+    """
 
     __tablename__ = "wm_events"
 
@@ -70,10 +92,62 @@ class WorkingMemoryEventORM(Base):
     created_at: Mapped[datetime] = mapped_column(nullable=False)
     expires_at: Mapped[datetime] = mapped_column(nullable=False, index=True)
     payload: Mapped[str] = mapped_column(Text, nullable=False)
+    trace_uid: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
+
+
+class AssistantTraceORM(Base):
+    """Assistant-level learning traces for the SMK index (``assistant_traces``).
+
+    ``payload`` is the full ``AssistantMemoryTrace`` as JSON; ``smk_raw`` is the
+    packed key, stored for inspection and ad-hoc SQL.
+    """
+
+    __tablename__ = "assistant_traces"
+
+    trace_uid: Mapped[str] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(nullable=False)
+    smk_raw: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    payload: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+
+
+def _backfill_wm_trace_uids(connection: Connection) -> None:
+    """Link pre-existing working-memory events to their trace, so ``forget`` purges
+    events written before the ``trace_uid`` column existed."""
+    rows = connection.execute(
+        text("SELECT id, payload FROM wm_events WHERE trace_uid IS NULL")
+    ).all()
+    updates = []
+    for row_id, payload in rows:
+        try:
+            uid = json.loads(payload).get("trace_uid")
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            continue
+        if isinstance(uid, str):
+            updates.append({"id": row_id, "uid": uid})
+    if updates:
+        connection.execute(text("UPDATE wm_events SET trace_uid = :uid WHERE id = :id"), updates)
+
+
+def _is_sqlite_memory(url: URL) -> bool:
+    database = url.database
+    return (
+        database in (None, "", SQLITE_MEMORY)
+        or url.query.get("mode") == "memory"
+    )
 
 
 class Database:
-    """One engine + session factory shared by every store, with schema bootstrap."""
+    """One engine + session factory shared by every store, with schema bootstrap.
+
+    SQLite specifics:
+
+    - file databases get their parent directory created and ``~`` expanded, WAL
+      journaling, and a 30 s busy timeout (a CLI and a daemon can share one file);
+    - ``:memory:`` databases use a single shared connection (``StaticPool``) and
+      serialize sessions, because store calls run in worker threads and the default
+      pool would hand each thread its own empty database.
+    """
 
     def __init__(
         self,
@@ -82,15 +156,25 @@ class Database:
         **overrides: Any,
     ) -> None:
         self.settings = settings or DatabaseSettings.from_overrides(overrides)
+        url = make_url(self.settings.resolved_url)
         engine_kwargs: dict[str, Any] = {}
-        if self.settings.url.startswith("sqlite"):
-            # Store calls run in worker threads (asyncio.to_thread); WAL keeps
-            # concurrent reader/writer turns from blocking each other, and the
-            # busy timeout lets multiple processes (a CLI and a daemon on one
-            # file) wait out each other's write locks instead of erroring.
+        self._serial_lock: threading.RLock | None = None
+
+        self.is_sqlite = url.get_backend_name() == "sqlite"
+        self.is_memory = self.is_sqlite and _is_sqlite_memory(url)
+        if self.is_sqlite:
             engine_kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30}
-        self.engine: Engine = create_engine(self.settings.url, **engine_kwargs)
-        if self.settings.url.startswith("sqlite"):
+            if self.is_memory:
+                engine_kwargs["poolclass"] = StaticPool
+                self._serial_lock = threading.RLock()
+            else:
+                path = Path(str(url.database)).expanduser()
+                path.parent.mkdir(parents=True, exist_ok=True)
+                url = url.set(database=str(path))
+
+        self.url: URL = url
+        self.engine: Engine = create_engine(url, **engine_kwargs)
+        if self.is_sqlite and not self.is_memory:
             event.listen(self.engine, "connect", _sqlite_wal_pragma)
         self.session_factory: sessionmaker[Session] = sessionmaker(
             bind=self.engine, expire_on_commit=False
@@ -102,26 +186,60 @@ class Database:
     # portable across SQLite/PostgreSQL/MySQL for nullable columns.
     _MICRO_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
         ("ltm_traces", "extra", "TEXT"),
+        ("wm_events", "trace_uid", "TEXT"),
     )
+    # Data fix-ups run in the same transaction as the column they follow.
+    _BACKFILLS: dict[tuple[str, str], Callable[[Connection], None]] = {
+        ("wm_events", "trace_uid"): _backfill_wm_trace_uids,
+    }
 
     def create_schema(self) -> None:
         """Create missing tables and add later-introduced columns. Idempotent."""
-        Base.metadata.create_all(self.engine)
-        inspector = inspect(self.engine)
-        tables = set(inspector.get_table_names())
-        for table, column, ddl_type in self._MICRO_MIGRATIONS:
-            if table not in tables:
-                continue
-            existing = {col["name"] for col in inspector.get_columns(table)}
-            if column not in existing:
-                with self.engine.begin() as connection:
-                    connection.execute(
-                        text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}")
-                    )
+        with self._serialized():
+            Base.metadata.create_all(self.engine)
+            inspector = inspect(self.engine)
+            tables = set(inspector.get_table_names())
+            for table, column, ddl_type in self._MICRO_MIGRATIONS:
+                if table not in tables:
+                    continue
+                existing = {col["name"] for col in inspector.get_columns(table)}
+                if column not in existing:
+                    with self.engine.begin() as connection:
+                        connection.execute(
+                            text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}")
+                        )
+                        backfill = self._BACKFILLS.get((table, column))
+                        if backfill is not None:
+                            backfill(connection)
 
     def session(self) -> Session:
-        """A new session; callers own commit/close."""
+        """A new session; callers own commit/close. Prefer :meth:`session_scope`."""
         return self.session_factory()
+
+    @contextmanager
+    def session_scope(self) -> Iterator[Session]:
+        """A session that is rolled back on error and always closed.
+
+        Commits stay explicit. For in-memory SQLite the scope also holds the
+        connection lock, so concurrent worker threads never interleave
+        transactions on the one shared connection.
+        """
+        with self._serialized():
+            session = self.session_factory()
+            try:
+                yield session
+            except BaseException:
+                session.rollback()
+                raise
+            finally:
+                session.close()
+
+    def dispose(self) -> None:
+        """Close pooled connections (an in-memory database is discarded)."""
+        self.engine.dispose()
+
+    def _serialized(self) -> threading.RLock | nullcontext[None]:
+        return self._serial_lock if self._serial_lock is not None else nullcontext()
 
 
 def _sqlite_wal_pragma(dbapi_connection: Any, _record: Any) -> None:

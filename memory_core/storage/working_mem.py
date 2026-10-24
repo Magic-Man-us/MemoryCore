@@ -5,17 +5,23 @@ Replaces the former Redis list-with-TTL. Same semantics, no service dependency:
 - per-user event stream, newest last
 - TTL expiry per event (like working-memory decay)
 - a hard per-user cap so a chatty session can't grow the table without bound
+
+An event whose payload carries a string ``trace_uid`` is linked to that trace, so
+forgetting the trace purges the event too.
 """
 
 from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import delete, func, select
 
 from .database import Database, WorkingMemoryEventORM
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 
 class SqlWorkingMemory:
@@ -35,7 +41,7 @@ class SqlWorkingMemory:
     def add_event(self, user_id: str, payload: dict[str, Any]) -> None:
         """Append one event for the user; opportunistically prunes expired/overflow rows.
 
-        The server-stamped ``ts`` is authoritative — a ``ts`` key in the payload is
+        The server-stamped ``ts`` is authoritative: a ``ts`` key in the payload is
         overwritten, not trusted. A payload that cannot be JSON-serialized raises a
         clear ``ValueError`` before anything touches the database.
         """
@@ -47,14 +53,15 @@ class SqlWorkingMemory:
             raise ValueError(
                 f"working-memory event payload must be JSON-serializable: {exc}"
             ) from exc
-        session = self._db.session()
-        try:
+        trace_uid = payload.get("trace_uid")
+        with self._db.session_scope() as session:
             session.add(
                 WorkingMemoryEventORM(
                     user_id=user_id,
                     created_at=now,
                     expires_at=now + timedelta(seconds=self.ttl_seconds),
                     payload=payload_json,
+                    trace_uid=trace_uid if isinstance(trace_uid, str) else None,
                 )
             )
             # Prune this user's expired events on every write (cheap, indexed).
@@ -65,23 +72,18 @@ class SqlWorkingMemory:
             )
             session.commit()
             self._enforce_cap(session, user_id)
-        finally:
-            session.close()
 
     def get_recent(self, user_id: str, limit: int = 20) -> list[dict[str, Any]]:
         """The user's most recent non-expired events, oldest first."""
-        session = self._db.session()
-        try:
-            stmt = (
-                select(WorkingMemoryEventORM.payload)
-                .where(WorkingMemoryEventORM.user_id == user_id)
-                .where(WorkingMemoryEventORM.expires_at > datetime.now(UTC))
-                .order_by(WorkingMemoryEventORM.id.desc())
-                .limit(limit)
-            )
+        stmt = (
+            select(WorkingMemoryEventORM.payload)
+            .where(WorkingMemoryEventORM.user_id == user_id)
+            .where(WorkingMemoryEventORM.expires_at > datetime.now(UTC))
+            .order_by(WorkingMemoryEventORM.id.desc())
+            .limit(limit)
+        )
+        with self._db.session_scope() as session:
             rows = session.execute(stmt).scalars().all()
-        finally:
-            session.close()
 
         out: list[dict[str, Any]] = []
         for raw in reversed(rows):
@@ -93,18 +95,37 @@ class SqlWorkingMemory:
                 out.append(loaded)
         return out
 
+    def delete_for_trace(self, trace_uid: str) -> int:
+        """Drop every event linked to a trace; returns the number removed."""
+        with self._db.session_scope() as session:
+            result = session.execute(
+                delete(WorkingMemoryEventORM).where(
+                    WorkingMemoryEventORM.trace_uid == trace_uid
+                )
+            )
+            session.commit()
+            return int(result.rowcount or 0)
+
+    def purge_expired(self) -> int:
+        """Delete expired events for every user; returns the number removed."""
+        with self._db.session_scope() as session:
+            result = session.execute(
+                delete(WorkingMemoryEventORM).where(
+                    WorkingMemoryEventORM.expires_at <= datetime.now(UTC)
+                )
+            )
+            session.commit()
+            return int(result.rowcount or 0)
+
     def clear(self, user_id: str) -> None:
         """Drop all of a user's working-memory events."""
-        session = self._db.session()
-        try:
+        with self._db.session_scope() as session:
             session.execute(
                 delete(WorkingMemoryEventORM).where(WorkingMemoryEventORM.user_id == user_id)
             )
             session.commit()
-        finally:
-            session.close()
 
-    def _enforce_cap(self, session: Any, user_id: str) -> None:
+    def _enforce_cap(self, session: Session, user_id: str) -> None:
         count = session.execute(
             select(func.count())
             .select_from(WorkingMemoryEventORM)

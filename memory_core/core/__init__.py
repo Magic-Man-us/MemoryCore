@@ -5,7 +5,9 @@ from .models import (
     AssistantMemoryTrace,
     MemoryCandidate,
     MemoryTrace,
+    PurgeResult,
     RecallResult,
+    ScoringWeights,
 )
 from .system import MemorySystem
 
@@ -16,5 +18,7 @@ __all__ = [
     "MemoryIndex",
     "MemorySystem",
     "MemoryTrace",
+    "PurgeResult",
     "RecallResult",
+    "ScoringWeights",
 ]

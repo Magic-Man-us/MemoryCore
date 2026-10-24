@@ -10,10 +10,10 @@ from memory_core import build_memory_system
 
 
 async def main() -> None:
-    # One SQLite file holds LTM, STM, and working memory; tables are created
-    # automatically. Point MEMORY_DB_URL (or overrides) at PostgreSQL later if
-    # you outgrow a file.
-    system = build_memory_system(overrides={"db": {"url": "sqlite:///example_memory.db"}})
+    # One local SQLite file holds LTM, STM, and working memory; tables (and any
+    # missing parent directories) are created automatically. Use ":memory:" for a
+    # throwaway database, or point MEMORY_DB_URL at PostgreSQL if you outgrow a file.
+    system = build_memory_system(sqlite_path="example_memory.db")
 
     user_id = "user_123"
     embedding = [0.1, 0.2, 0.3] * 128  # 384-dim example; supply your model's vectors,
@@ -41,6 +41,10 @@ async def main() -> None:
     # After a restart, repopulate the in-RAM index from the database:
     restored = await system.hydrate(user_id)
     print(f"Hydrated {restored} traces from LTM")
+
+    # Forgetting removes the trace from the index, LTM, STM, and linked WM events.
+    await system.forget(trace.trace_uid)
+    print("Forgot it")
 
 
 if __name__ == "__main__":

@@ -17,6 +17,14 @@ class MemoryIndex(Protocol):
     relevant memories given a query embedding and simple filters.
     """
 
+    def check_embedding(self, embedding: list[float]) -> None:
+        """Raise ValueError if ``ingest`` would reject this embedding.
+
+        Called before anything is persisted, so input the index would reject never
+        reaches the database.
+        """
+        ...
+
     def ingest(self, trace: MemoryTrace, embedding: Iterable[float]) -> None:
         """Store or update a trace in the index."""
         ...
@@ -33,12 +41,12 @@ class MemoryIndex(Protocol):
         """Search a user's memories; returns ranked candidates."""
         ...
 
-    def mark_accessed(self, trace_uid: str) -> None:
-        """Record that a trace has been accessed."""
+    def mark_accessed(self, trace_uid: str) -> bool:
+        """Record that a trace has been accessed. False when the trace is unknown."""
         ...
 
-    def remove(self, trace_uid: str) -> None:
-        """Remove a trace from the index."""
+    def remove(self, trace_uid: str) -> bool:
+        """Remove a trace from the index. False when the trace is unknown."""
         ...
 
 

@@ -181,3 +181,113 @@ class TestSqlWorkingMemory:
         with pytest.raises(ValueError, match="JSON-serializable"):
             wm.add_event("alice", {"bad": object()})
         assert wm.get_recent("alice") == []  # nothing was written
+
+
+class TestLongTermAccess:
+    def test_increment_access(self, db):
+        store = LongTermStore(db)
+        store.upsert_trace(_trace("u1"), embedding=[0.1])
+        store.upsert_trace(_trace("u2"), embedding=[0.1])
+        assert store.increment_access(["u1", "u1", "missing"]) == 1
+        counts = {t.trace_uid: t.access_count for t, _ in store.fetch_traces_for_user("alice")}
+        assert counts == {"u1": 1, "u2": 0}
+        assert store.increment_access([]) == 0
+
+
+class TestWorkingMemoryTraceLinks:
+    def test_delete_for_trace_only_hits_linked_events(self, db):
+        wm = SqlWorkingMemory(db, ttl_seconds=60)
+        wm.add_event("alice", {"kind": "ltm_trace", "trace_uid": "t-1"})
+        wm.add_event("alice", {"kind": "turn"})
+        wm.add_event("alice", {"kind": "odd", "trace_uid": 42})  # non-str uid: not linked
+        assert wm.delete_for_trace("t-1") == 1
+        assert [e["kind"] for e in wm.get_recent("alice")] == ["turn", "odd"]
+
+    def test_schema_upgrade_adds_wm_trace_uid_column(self, tmp_path):
+        from sqlalchemy import create_engine, text
+
+        from memory_core.storage import Database, DatabaseSettings
+
+        url = f"sqlite:///{tmp_path}/old_wm.db"
+        old_engine = create_engine(url)
+        with old_engine.begin() as connection:
+            connection.execute(
+                text(
+                    "CREATE TABLE wm_events (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                    "user_id VARCHAR NOT NULL, created_at DATETIME NOT NULL, "
+                    "expires_at DATETIME NOT NULL, payload TEXT NOT NULL)"
+                )
+            )
+        old_engine.dispose()
+
+        upgraded = Database(settings=DatabaseSettings(url=url))
+        upgraded.create_schema()
+        wm = SqlWorkingMemory(upgraded, ttl_seconds=60)
+        wm.add_event("alice", {"trace_uid": "t-1"})
+        assert wm.delete_for_trace("t-1") == 1
+
+
+class TestAssistantStore:
+    def test_roundtrip_upsert_delete(self, db):
+        from memory_core.storage import AssistantStore
+        from tests.conftest import make_assistant_trace
+
+        store = AssistantStore(db)
+        trace = make_assistant_trace(trace_uid="a-1", extra={"source": "review"})
+        trace.smk_raw = 123
+        store.upsert_trace(trace, embedding=[0.5, 0.5])
+        store.upsert_trace(trace, embedding=[0.25, 0.75])
+
+        [(loaded, embedding)] = store.fetch_all()
+        assert loaded == trace
+        assert embedding == [0.25, 0.75]
+        assert store.delete_trace("a-1") is True
+        assert store.delete_trace("a-1") is False
+        assert store.fetch_all() == []
+
+
+def test_wm_migration_backfills_trace_links_for_existing_events(tmp_path):
+    """PR #17 review: events written before the column existed must still be
+    purged by forget()."""
+    import json
+
+    from sqlalchemy import create_engine, text
+
+    from memory_core.storage import Database, DatabaseSettings
+
+    url = f"sqlite:///{tmp_path}/legacy_wm.db"
+    old_engine = create_engine(url)
+    with old_engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE wm_events (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "user_id VARCHAR NOT NULL, created_at DATETIME NOT NULL, "
+                "expires_at DATETIME NOT NULL, payload TEXT NOT NULL)"
+            )
+        )
+        future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+        for payload in (
+            {"kind": "ltm_trace", "trace_uid": "t-1", "summary": "secret"},
+            {"kind": "turn"},
+            {"kind": "odd", "trace_uid": 7},
+        ):
+            connection.execute(
+                text(
+                    "INSERT INTO wm_events (user_id, created_at, expires_at, payload) "
+                    "VALUES ('alice', :now, :exp, :payload)"
+                ),
+                {"now": datetime.now(UTC).isoformat(), "exp": future,
+                 "payload": json.dumps(payload)},
+            )
+        connection.execute(
+            text(
+                "INSERT INTO wm_events (user_id, created_at, expires_at, payload) "
+                "VALUES ('alice', :now, :exp, 'not json')"
+            ),
+            {"now": datetime.now(UTC).isoformat(), "exp": future},
+        )
+    old_engine.dispose()
+
+    upgraded = Database(settings=DatabaseSettings(url=url))
+    upgraded.create_schema()
+    assert SqlWorkingMemory(upgraded).delete_for_trace("t-1") == 1

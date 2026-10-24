@@ -1,5 +1,25 @@
 # MemoryCore review — readiness for driving Junovera's memory system
 
+> **Update (2026-10-24, v0.3.0): every item below is closed.** Remaining items landed:
+> **P1-6** (seeds filtered to the user before the fallback decision, now via per-user
+> posting lists), **P1-8** (all dimension mismatches are `ValueError`; NaN-safe total-order
+> ranking), **P1-9** (`TryFrom` validation; topic is an open validated `u8` in Rust, so
+> the Python/Rust topic-name drift is gone and Python owns the taxonomy), **P1-10**
+> (SMK ingest is an upsert; removal supported; collision check), **P1-11** (access counts
+> persist to LTM and survive hydrate; the Rust engine really deletes with `swap_remove` and
+> re-posts on update, so no tombstones or stale keyword entries; `forget` also clears STM
+> and linked WM events; `purge_expired` sweeps STM/WM), **P1-12** (Rust rejects importance
+> outside [0, 1] and empty query embeddings). P2: `assistant_traces` table +
+> `hydrate_assistant` / `forget_assistant`; `recall_assistant` filters exposed as typed
+> `Level2Bits` (defaults documented); recency and access-frequency score terms
+> (configurable, off by default); GIL released for every engine call behind an `RwLock`.
+> Also: `remember` validates against the index before persisting (a wrong-dimension write
+> used to poison every later hydrate); overrides are validated and unknown keys raise;
+> `sqlite_path` shortcut, working `:memory:` SQLite across worker threads, parent-dir
+> creation; Rust unit tests + CI (clippy, cargo test, pytest, examples). The broken
+> `examples/example.rs` (failed `cargo test`) was removed; its assertions live on as Rust
+> unit tests.
+
 > **Update (2026-07-20, same branch): SQL-only refactor landed.** Per the owner's decision
 > ("forget redis and maria db, just sql"), this branch now implements the fixes rather than
 > just cataloguing them. Redis and MariaDB are gone; one SQL database (SQLite by default,

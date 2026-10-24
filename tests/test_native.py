@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from memory_core._native import PyMemoryEngine
 
 from memory_core import (
     AssistantMemoryIndex,
@@ -12,7 +13,6 @@ from memory_core import (
     ToolFlag,
     TopicBucket,
 )
-from memory_core._native import PyMemoryEngine
 from memory_core.indexing.assistant_index import stable_memory_id
 
 DIM = 8
@@ -160,7 +160,7 @@ def test_smk_unknown_enum_discriminants_raise_value_error():
     index = PyAssistantMemoryIndex(DIM)
     with pytest.raises(ValueError, match="invalid topic"):
         index.add(
-            id=1, topic=99, kind=1, tool_mask=0, difficulty=0, generality=0,
+            id=1, topic=0, kind=1, tool_mask=0, difficulty=0, generality=0,
             importance=0, embedding=emb(1),
         )
     with pytest.raises(ValueError, match="invalid kind"):
@@ -168,8 +168,53 @@ def test_smk_unknown_enum_discriminants_raise_value_error():
             id=1, topic=1, kind=42, tool_mask=0, difficulty=0, generality=0,
             importance=0, embedding=emb(1),
         )
+    with pytest.raises(ValueError, match="invalid level"):
+        index.add(
+            id=1, topic=1, kind=1, tool_mask=0, difficulty=4, generality=0,
+            importance=0, embedding=emb(1),
+        )
     with pytest.raises(ValueError, match="invalid topic"):
-        PySmkQuery(topic=99)
+        PySmkQuery(topic=0)
+    with pytest.raises(OverflowError):
+        PySmkQuery(topic=256)
+    assert len(index) == 0  # nothing invalid was stored
+
+
+def test_smk_topic_is_an_open_u8_python_owns_the_taxonomy():
+    """Review P1-9 drift fix: Rust no longer names topics, so a new Python topic
+    value (here 99) works without a Rust change and filters exactly."""
+    from memory_core._native import PyAssistantMemoryIndex, PySmkQuery
+
+    index = PyAssistantMemoryIndex(DIM)
+    raw = index.add(
+        id=1, topic=99, kind=1, tool_mask=0b11, difficulty=2, generality=2,
+        importance=2, embedding=emb(1),
+    )
+    assert raw & 0xFF == 99
+    assert [h[0] for h in index.query_top_k_filtered(emb(1), 5, PySmkQuery(topic=99))] == [1]
+    assert index.query_top_k_filtered(emb(1), 5, PySmkQuery(topic=1)) == []
+
+
+def test_smk_add_is_an_upsert_and_remove_frees_the_slot():
+    from memory_core._native import PyAssistantMemoryIndex, PySmkQuery
+
+    index = PyAssistantMemoryIndex(DIM)
+    for _ in range(3):
+        index.add(
+            id=7, topic=1, kind=1, tool_mask=0, difficulty=0, generality=0,
+            importance=0, embedding=emb(1),
+        )
+    assert len(index) == 1
+    assert index.remove(7) is True
+    assert index.remove(7) is False
+    assert index.query_top_k_filtered(emb(1), 5, PySmkQuery()) == []
+
+
+def test_engine_rejects_invalid_weights():
+    with pytest.raises(ValueError, match="semantic_weight"):
+        PyMemoryEngine(semantic_weight=-1.0)
+    with pytest.raises(ValueError, match="recency_half_life_days"):
+        PyMemoryEngine(recency_half_life_days=0.0)
 
 
 def test_smk_dim_mismatch_raises_value_error_not_panic():
