@@ -106,3 +106,10 @@ Reconciliation adds at most one exact candidate beyond its 20 semantic neighbors
 planning reserves a slot within its existing neighbor budget for an exact duplicate.
 Supersession removes old entries, and dream merges update both records' timestamps.
 These indexes rebuild from SQLite on startup and trade additional RAM for less query work.
+
+## Automatic task lifecycle
+
+For task sessions, evidence-backed knowledge resolution, durable background
+reconciliation, and SDK/tool hooks, see [Automatic task memory](task-lifecycle.md).
+The `MemoryCore` facade wraps the typed service; existing direct service callers
+remain compatible.

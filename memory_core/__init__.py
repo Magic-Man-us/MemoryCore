@@ -47,3 +47,7 @@ __all__ = [
 from .memory import REQUEST_ADAPTER, RESPONSE_ADAPTER, EmbeddingSpec, MemoryService
 
 __all__ += ["REQUEST_ADAPTER", "RESPONSE_ADAPTER", "EmbeddingSpec", "MemoryService"]
+
+from .runtime import MemoryCore
+
+__all__ += ["MemoryCore"]

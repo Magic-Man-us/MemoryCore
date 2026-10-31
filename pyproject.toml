@@ -39,6 +39,13 @@ postgres = [
 ai = [
     "pydantic-ai>=1.102.0",
 ]
+mcp = [
+    "mcp>=2.3,<3",
+]
+claude = [
+    "claude-agent-sdk>=0.2.176,<0.3",
+    "mcp>=2.3,<3",
+]
 
 [tool.maturin]
 # Mixed Rust/Python layout: the `memory_core/` package at the repo root is the

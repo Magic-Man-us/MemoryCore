@@ -6,6 +6,7 @@ import asyncio
 import math
 import secrets
 import threading
+from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 
 from sqlalchemy import text
@@ -59,9 +60,13 @@ class MemoryService:
         dream_planner: DreamPlanner | None = None,
         dream_after_writes: int = 100,
         retrieval_policy: RetrievalPolicy | None = None,
+        max_cached_owners: int = 16,
     ):
         if dream_after_writes < 1:
             raise ValueError("dream_after_writes must be positive")
+        if type(max_cached_owners) is not int or max_cached_owners < 1:
+            raise ValueError("max_cached_owners must be a positive integer")
+        self.max_cached_owners = max_cached_owners
         self.retrieval_policy = retrieval_policy or RetrievalPolicy()
         self.store = Store(db)
         self.spec = embedding_spec
@@ -69,9 +74,10 @@ class MemoryService:
         self.reconciler = reconciler
         self.dream_planner = dream_planner
         self.dream_after_writes = dream_after_writes
-        self._caches: dict[str, OwnerCache] = {}
+        self._caches: OrderedDict[str, OwnerCache] = OrderedDict()
         self._lock = threading.RLock()
         self._receipts = {}
+        self._commit_observer = None
 
     def _snapshot(self, session, owner):
         state = self.store.state(session, owner)
@@ -94,6 +100,9 @@ class MemoryService:
         except BaseException:
             self._caches.pop(owner, None)
             raise
+        self._caches.move_to_end(owner)
+        while len(self._caches) > self.max_cached_owners:
+            self._caches.popitem(last=False)
         return cache, Registry(self.store.fields(session, owner)), state
 
     async def _vector(self, supplied, value):
@@ -204,7 +213,7 @@ class MemoryService:
         return await asyncio.to_thread(run)
 
     async def remember_reconciled(
-        self, request: RememberRequest, *, owner_id: str
+        self, request: RememberRequest, *, owner_id: str, _commit=None
     ) -> RememberResponse:
         vector = await self._vector(request.embedding, request.memory.summary)
 
@@ -280,15 +289,21 @@ class MemoryService:
                 stored, new_generation = apply_reconciliation(
                     self, session, owner_id, cache, memory, vector, decision, allowed
                 )
-                return RememberResponse(
+                response = RememberResponse(
                     memory=stored,
                     decision=decision,
                     neighbors=neighbors,
                     generation=new_generation,
                 )
 
+                if self._commit_observer is not None:
+                    self._commit_observer(session, owner_id)
+                if _commit is not None:
+                    _commit(session, response)
+                return response
+
         result = await asyncio.to_thread(persist)
-        if self.dream_after_writes:
+        if self.dream_after_writes and self._commit_observer is None:
             try:
                 if await self.dream_due(owner_id):
                     planned = await self.dream(owner_id=owner_id)
