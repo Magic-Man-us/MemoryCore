@@ -62,15 +62,15 @@ jobs:
       - name: Install
         run: |
           uv venv
-          uv pip install -e ".[dev]"
+          uv pip install -e ".[dev,mcp,claude]"
           uv run maturin develop --uv
 
       - name: Tests
-        run: uv run pytest -q
+        run: uv run --extra dev --extra mcp --extra claude pytest -q
 
       - name: Examples
         working-directory: ${{ runner.temp }}
         run: |
-          for example in basic_usage per_user_assistant typed_memory; do
+          for example in basic_usage per_user_assistant typed_memory task_lifecycle; do
             uv run --project "$GITHUB_WORKSPACE" python "$GITHUB_WORKSPACE/examples/$example.py"
           done

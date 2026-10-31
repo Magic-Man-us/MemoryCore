@@ -140,7 +140,7 @@ async def plan(service, owner, request):
     return await asyncio.to_thread(save)
 
 
-async def apply(service, owner, plan_id):
+async def apply(service, owner, plan_id, *, on_commit=None):
     def load():
         with service._lock, service.store.transaction(owner) as session:
             raw = session.execute(
@@ -286,7 +286,10 @@ async def apply(service, owner, plan_id):
                     ),
                     {"c": result.cursor, "ci": result.cursor_id, "o": owner},
                 )
-                return DreamResponse(plan=applied, due=False)
+                response = DreamResponse(plan=applied, due=False)
+                if on_commit is not None:
+                    on_commit(session, response)
+                return response
         finally:
             # A failed transaction must never leave a speculative cache behind.
             with service._lock:
