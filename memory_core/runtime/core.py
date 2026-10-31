@@ -74,6 +74,12 @@ class MemoryCore:
     async def __aexit__(self, exc_type, exc, tb):
         await self.worker.stop()
 
+    async def measurements(self, *, owner_id):
+        """Sample owner counts and whole-database disk usage without loading memories."""
+        from .metrics import measure
+
+        return await asyncio.to_thread(measure, self, owner_id)
+
     def task(self, *, owner_id, context, objective):
         from .task import TaskSession
 

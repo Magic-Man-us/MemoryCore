@@ -107,6 +107,7 @@ class MaintenancePolicy(Model):
     max_attempts: int = Field(default=5, ge=1, le=100)
     retry_seconds: float = Field(default=1, ge=0, le=3600)
     dream_after_writes: int = Field(default=100, ge=1)
+    dream_batch_size: int = Field(default=16, ge=1, le=100)
     apply_exact_duplicates: bool = True
     apply_semantic_changes: bool = False
 

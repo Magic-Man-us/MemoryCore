@@ -23,6 +23,7 @@ DDL = (
        owner TEXT NOT NULL, id TEXT NOT NULL, generation INTEGER NOT NULL,
        payload TEXT NOT NULL, embedding BLOB, PRIMARY KEY(owner,id))""",
     "CREATE INDEX IF NOT EXISTS memories_generation ON memories_v1(owner,generation)",
+    "CREATE INDEX IF NOT EXISTS memories_scan_cursor ON memories_v1(owner,generation,id)",
     """CREATE TABLE IF NOT EXISTS memory_fields (
        owner TEXT NOT NULL, name TEXT NOT NULL, definition TEXT NOT NULL,
        PRIMARY KEY(owner,name))""",
@@ -112,6 +113,16 @@ class Store:
             {"o": owner, "g": generation, "a": action, "d": json.dumps(detail)},
         )
         return generation
+
+    @staticmethod
+    def contains(session, owner, memory_id):
+        return (
+            session.execute(
+                text("SELECT 1 FROM memories_v1 WHERE owner=:o AND id=:id"),
+                {"o": owner, "id": memory_id},
+            ).first()
+            is not None
+        )
 
     @staticmethod
     def put(session, owner, memory, embedding, generation):

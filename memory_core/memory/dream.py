@@ -30,7 +30,7 @@ def due(service, owner):
         return state["writes"] - state["dream_writes"] >= service.dream_after_writes
 
 
-async def plan(service, owner, request):
+async def plan(service, owner, request, *, scan=None):
     def snapshot():
         with service._lock, service.store.transaction(owner) as session:
             cache, _, state = service._snapshot(session, owner)
@@ -38,56 +38,70 @@ async def plan(service, owner, request):
             # a stable ID cursor encoded in the plan's source batch (no full payload scan).
             rows = session.execute(
                 text("""SELECT id,embedding,generation FROM memories_v1
-                WHERE owner=:o AND (generation>:cursor OR (generation=:cursor AND id>:cursor_id)) ORDER BY generation,id LIMIT :limit"""),
+                WHERE owner=:o AND generation<=:end AND (generation>:cursor OR (generation=:cursor AND id>:cursor_id)) ORDER BY generation,id LIMIT :limit"""),
                 {
                     "o": owner,
-                    "cursor": state["dream_cursor"],
-                    "cursor_id": state["dream_cursor_id"],
+                    "cursor": scan["cursor"] if scan else state["dream_cursor"],
+                    "cursor_id": scan["cursor_id"]
+                    if scan
+                    else state["dream_cursor_id"],
+                    "end": scan["end"] if scan else state["generation"],
                     "limit": request.batch_size,
                 },
             ).all()
-            if not rows:
+            if not rows and scan is None:
                 # Revisit old records too: consolidation can improve after new evidence arrives.
                 rows = session.execute(
                     text("""SELECT id,embedding,generation FROM memories_v1
                     WHERE owner=:o ORDER BY generation,id LIMIT :limit"""),
                     {"o": owner, "limit": request.batch_size},
                 ).all()
-            groups = []
-            for uid, raw, _ in rows:
-                memory = cache.memories[uid]
-                if memory.status != Status.ACTIVE or not raw:
-                    continue
-                ids = cache.eligible(getattr(memory.scope, "project_id", None)) - {uid}
-                hits = cache.search(
-                    memory.summary,
-                    decode_embedding(raw),
-                    ids,
-                    request.neighbors_per_memory,
-                )
-                # Prefer one exact duplicate within the existing neighbor budget.
-                # This remains useful even when vector similarity is zero.
-                exact = cache.equivalents.get(equivalence_key(memory), set()) & ids
-                if exact:
-                    target = min(exact)
-                    hits = [(target, 0.0)] + [(i, s) for i, s in hits if i != target]
-                    hits = hits[: request.neighbors_per_memory]
-                groups.append(
-                    DreamGroup(
-                        memory=memory.model_copy(deep=True),
-                        neighbors=[
-                            MemoryHit(
-                                memory=cache.memories[i].model_copy(deep=True), score=s
-                            )
-                            for i, s in hits
-                        ],
-                    )
-                )
-            cursor = rows[-1][2] if rows else state["dream_cursor"]
-            cursor_id = rows[-1][0] if rows else state["dream_cursor_id"]
-            return groups, dict(state), cursor, cursor_id
+            return rows, dict(state), cache
 
-    groups, state, cursor, cursor_id = await asyncio.to_thread(snapshot)
+    rows, state, cache = await asyncio.to_thread(snapshot)
+
+    def group_for(uid, raw):
+        with service._lock:
+            if cache.generation != state["generation"]:
+                raise ConflictError("memory changed during dream snapshot; replan")
+            memory = cache.memories.get(uid)
+            if memory is None or memory.status != Status.ACTIVE or not raw:
+                return None
+            ids = cache.eligible(getattr(memory.scope, "project_id", None)) - {uid}
+            hits = cache.search(
+                memory.summary,
+                decode_embedding(raw),
+                ids,
+                request.neighbors_per_memory,
+            )
+            # Prefer one exact duplicate within the existing neighbor budget.
+            # This remains useful even when vector similarity is zero.
+            exact = cache.equivalents.get(equivalence_key(memory), set()) & ids
+            if exact:
+                target = min(exact)
+                hits = [(target, 0.0)] + [(i, s) for i, s in hits if i != target]
+                hits = hits[: request.neighbors_per_memory]
+            return DreamGroup(
+                memory=memory.model_copy(deep=True),
+                neighbors=[
+                    MemoryHit(memory=cache.memories[i].model_copy(deep=True), score=s)
+                    for i, s in hits
+                ],
+            )
+
+    groups = []
+    for uid, raw, _ in rows:
+        group = await asyncio.to_thread(group_for, uid, raw)
+        if group is not None:
+            groups.append(group)
+    cursor = (
+        rows[-1][2] if rows else (scan["cursor"] if scan else state["dream_cursor"])
+    )
+    cursor_id = (
+        rows[-1][0]
+        if rows
+        else (scan["cursor_id"] if scan else state["dream_cursor_id"])
+    )
     if service.dream_planner is not None:
         proposal = DreamProposal.model_validate(await service.dream_planner(groups))
     else:
@@ -116,7 +130,7 @@ async def plan(service, owner, request):
         generation=state["generation"],
         cursor=cursor,
         cursor_id=cursor_id,
-        writes=state["writes"],
+        writes=scan["writes"] if scan else state["writes"],
         groups=groups,
         proposal=proposal,
     )
@@ -131,16 +145,17 @@ async def plan(service, owner, request):
                 {"o": owner, "id": result.id, "p": result.model_dump_json()},
             )
             # Pending proposals count as scheduled work; writes since this snapshot trigger the next pass.
-            session.execute(
-                text("UPDATE memory_owners SET dream_writes=:w WHERE owner=:o"),
-                {"o": owner, "w": result.writes},
-            )
+            if scan is None:
+                session.execute(
+                    text("UPDATE memory_owners SET dream_writes=:w WHERE owner=:o"),
+                    {"o": owner, "w": result.writes},
+                )
         return DreamResponse(plan=result, due=False)
 
     return await asyncio.to_thread(save)
 
 
-async def apply(service, owner, plan_id, *, on_commit=None):
+async def apply(service, owner, plan_id, *, on_commit=None, _advance_cursor=True):
     def load():
         with service._lock, service.store.transaction(owner) as session:
             raw = session.execute(
@@ -280,19 +295,27 @@ async def apply(service, owner, plan_id, *, on_commit=None):
                 service.store.bump(
                     session, owner, "dream_applied", {"plan_id": plan_id}, write=False
                 )
-                session.execute(
-                    text(
-                        "UPDATE memory_owners SET dream_cursor=:c,dream_cursor_id=:ci,dream_writes=writes WHERE owner=:o"
-                    ),
-                    {"c": result.cursor, "ci": result.cursor_id, "o": owner},
-                )
+                if _advance_cursor:
+                    session.execute(
+                        text(
+                            "UPDATE memory_owners SET dream_cursor=:c,dream_cursor_id=:ci,dream_writes=MAX(dream_writes,:w) WHERE owner=:o"
+                        ),
+                        {
+                            "c": result.cursor,
+                            "ci": result.cursor_id,
+                            "w": result.writes,
+                            "o": owner,
+                        },
+                    )
                 response = DreamResponse(plan=applied, due=False)
                 if on_commit is not None:
                     on_commit(session, response)
                 return response
-        finally:
-            # A failed transaction must never leave a speculative cache behind.
+        except BaseException:
+            # Only rollback invalidates speculative cache state; successful commits
+            # are picked up incrementally by the next snapshot.
             with service._lock:
                 service._caches.pop(owner, None)
+            raise
 
     return await asyncio.to_thread(commit)

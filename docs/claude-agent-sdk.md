@@ -211,3 +211,6 @@ Official interfaces used:
 - <https://code.claude.com/docs/en/agent-sdk/hooks>
 - <https://code.claude.com/docs/en/agent-sdk/structured-outputs>
 - <https://github.com/anthropics/claude-agent-sdk-python>
+
+For maintenance continuation, retained history, local diagnostics, and growth
+benchmarks, see [Growing a local memory collection](local-memory-growth.md).

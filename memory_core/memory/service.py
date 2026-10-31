@@ -183,6 +183,15 @@ class MemoryService:
         def run():
             with self._lock, self.store.transaction(owner_id) as session:
                 cache, registry, state = self._snapshot(session, owner_id)
+                if Status.SUPERSEDED in request.statuses:
+                    from .history import recall_history
+
+                    return RecallResponse(
+                        hits=recall_history(
+                            self, session, owner_id, request, vector, registry
+                        ),
+                        generation=state["generation"],
+                    )
                 ids = cache.eligible(request.project_id, active=False) & set.union(
                     set(), *(cache.by_status[status] for status in request.statuses)
                 )
@@ -229,7 +238,7 @@ class MemoryService:
                     raise SchemaError(
                         "new records must be active at revision 1; use reconciliation for changes"
                     )
-                if memory.id in cache.memories:
+                if self.store.contains(session, owner_id, memory.id):
                     raise ConflictError("memory id already exists")
                 ids = cache.eligible(getattr(memory.scope, "project_id", None))
                 neighbors = [

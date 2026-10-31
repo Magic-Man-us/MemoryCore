@@ -42,7 +42,7 @@ def equivalent(a, b):
 def apply_reconciliation(
     service, session, owner, cache, memory, vector, decision, allowed
 ):
-    if memory.id in cache.memories:
+    if service.store.contains(session, owner, memory.id):
         raise ConflictError("new memory id already exists")
     target = None
     if not isinstance(decision, Create):

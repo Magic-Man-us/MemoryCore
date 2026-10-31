@@ -85,14 +85,15 @@ class Queue:
     def enqueue(session, owner, kind, payload, task_id=None):
         job_id = str(uuid4())
         session.execute(
-            text("""INSERT INTO memory_jobs(owner,id,task_id,kind,payload)
-            VALUES (:o,:id,:task,:kind,:payload)"""),
+            text("""INSERT INTO memory_jobs(owner,id,task_id,kind,payload,available)
+            VALUES (:o,:id,:task,:kind,:payload,:available)"""),
             {
                 "o": owner,
                 "id": job_id,
                 "task": task_id,
                 "kind": kind,
                 "payload": json.dumps(payload),
+                "available": time.time(),
             },
         )
         return job_id
@@ -124,7 +125,7 @@ class Queue:
             return
         pending = session.execute(
             text("""SELECT 1 FROM memory_jobs WHERE owner=:o
-            AND kind='dream' AND status IN ('pending','running','proposed') LIMIT 1"""),
+            AND kind='dream' AND status IN ('pending','running') LIMIT 1"""),
             {"o": owner},
         ).first()
         if pending is None:

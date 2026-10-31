@@ -21,7 +21,8 @@ def tokens(text_value: str) -> set[str]:
 
 
 class OwnerCache:
-    def __init__(self, dim: int, policy: RetrievalPolicy):
+    def __init__(self, dim: int, policy: RetrievalPolicy, *, include_retired=False):
+        self.include_retired = include_retired
         self.policy = policy
         self.generation = -1
         self.memories = {}
@@ -41,10 +42,19 @@ class OwnerCache:
             return
         rows = session.execute(
             text(
-                "SELECT payload,embedding FROM memories_v1 WHERE owner=:o AND generation>:g"
+                """SELECT payload,embedding FROM memories_v1 WHERE owner=:o AND generation>:g
+                AND (:retired=1 OR json_extract(payload,'$.status')!='superseded')"""
             ),
-            {"o": owner, "g": self.generation},
+            {
+                "o": owner,
+                "g": self.generation,
+                "retired": int(self.include_retired or self.generation >= 0),
+            },
         )
+        self.update_rows(rows)
+        self.generation = generation
+
+    def update_rows(self, rows):
         for payload, embedding in rows:
             memory = MEMORY_ADAPTER.validate_json(payload)
             previous = self.memories.get(memory.id)
@@ -52,11 +62,18 @@ class OwnerCache:
                 self._unindex_content(previous)
                 for token in tokens(previous.summary):
                     self.lexical[token].discard(memory.id)
+                    if not self.lexical[token]:
+                        del self.lexical[token]
                 self.by_kind[previous.kind].discard(memory.id)
                 self.by_status[previous.status].discard(memory.id)
                 self.by_project[getattr(previous.scope, "project_id", None)].discard(
                     memory.id
                 )
+            if memory.status == "superseded" and not self.include_retired:
+                self.memories.pop(memory.id, None)
+                self.metadata.remove(memory.id)
+                self.vectors.remove(memory.id)
+                continue
             self.memories[memory.id] = memory
             self._index_content(memory)
             self.metadata.upsert(
@@ -72,7 +89,6 @@ class OwnerCache:
                 self.vectors.upsert(memory.id, decode_embedding(embedding))
             else:
                 self.vectors.remove(memory.id)
-        self.generation = generation
 
     def _index_content(self, memory):
         if memory.status == "active":
