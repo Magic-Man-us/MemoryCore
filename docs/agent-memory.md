@@ -88,3 +88,21 @@ counter; applying it advances the consolidation cursor. Pending plans do not sil
 
 The SQLite audit trail records memory IDs, decisions, revisions through stored records, and
 source references. No payload-log fingerprint feature is introduced.
+
+### Indexed preference and duplicate lookup
+
+Preference applicability uses per-owner field/value posting lists. A task reads only
+postings for its supplied attributes, unions alternatives within each field, and requires
+all fields of each rule to match. Unconditional rules are included separately. Project
+scope, explicit-rule precedence, conflicts, and complete (not top-k) resolution still apply.
+The host must supply task attributes; the store does not infer that a tool call is Python.
+The worst case remains proportional to the matching rules, including broad global rules.
+
+An incremental exact-content index finds structured duplicates independently of semantic
+ranking. Lifecycle timestamps, IDs, revisions, and evidence references do not change
+content identity; scope, applicability, values, metadata, and substantive text do. This is
+strict equality, not a claim that differently worded statements mean the same thing.
+Reconciliation adds at most one exact candidate beyond its 20 semantic neighbors. Dream
+planning reserves a slot within its existing neighbor budget for an exact duplicate.
+Supersession removes old entries, and dream merges update both records' timestamps.
+These indexes rebuild from SQLite on startup and trade additional RAM for less query work.

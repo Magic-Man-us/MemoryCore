@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from heapq import nsmallest
 
 from sqlalchemy import text
 
 from memory_core._native import PyVectorIndex
 from memory_core.storage.codec import decode_embedding
 
-from .metadata import MetadataIndex
+from .metadata import MetadataIndex, value_key
 from .models import MEMORY_ADAPTER, RetrievalPolicy
+from .reconciliation import equivalence_key
 
 
 def tokens(text_value: str) -> set[str]:
@@ -29,6 +31,10 @@ class OwnerCache:
         self.by_kind = defaultdict(set)
         self.by_status = defaultdict(set)
         self.by_project = defaultdict(set)
+        self.equivalents = defaultdict(set)
+        self.preference_terms = defaultdict(set)
+        self.preference_fields = {}
+        self.unconditional_preferences = set()
 
     def sync(self, session, owner, generation):
         if self.generation == generation:
@@ -43,6 +49,7 @@ class OwnerCache:
             memory = MEMORY_ADAPTER.validate_json(payload)
             previous = self.memories.get(memory.id)
             if previous:
+                self._unindex_content(previous)
                 for token in tokens(previous.summary):
                     self.lexical[token].discard(memory.id)
                 self.by_kind[previous.kind].discard(memory.id)
@@ -51,6 +58,7 @@ class OwnerCache:
                     memory.id
                 )
             self.memories[memory.id] = memory
+            self._index_content(memory)
             self.metadata.upsert(
                 memory.id,
                 {**memory.metadata, "kind": memory.kind, "status": memory.status.value},
@@ -66,6 +74,57 @@ class OwnerCache:
                 self.vectors.remove(memory.id)
         self.generation = generation
 
+    def _index_content(self, memory):
+        if memory.status == "active":
+            self.equivalents[equivalence_key(memory)].add(memory.id)
+        if memory.kind != "preference" or memory.status == "superseded":
+            return
+        self.preference_fields[memory.id] = len(memory.applicability)
+        if not memory.applicability:
+            self.unconditional_preferences.add(memory.id)
+        for field, values in memory.applicability.items():
+            for value in values:
+                self.preference_terms[field, value_key(value)].add(memory.id)
+
+    def _unindex_content(self, memory):
+        key = equivalence_key(memory)
+        bucket = self.equivalents.get(key)
+        if bucket is not None:
+            bucket.discard(memory.id)
+            if not bucket:
+                del self.equivalents[key]
+        if memory.kind != "preference":
+            return
+        self.preference_fields.pop(memory.id, None)
+        self.unconditional_preferences.discard(memory.id)
+        for field, values in memory.applicability.items():
+            for value in values:
+                key = field, value_key(value)
+                bucket = self.preference_terms.get(key)
+                if bucket is not None:
+                    bucket.discard(memory.id)
+                    if not bucket:
+                        del self.preference_terms[key]
+
+    def matching_preferences(self, attributes, project_id):
+        # OR within each field, AND across required fields. Only matching postings
+        # are visited; unrelated preference payloads are never inspected.
+        counts = defaultdict(int)
+        for field, actual in attributes.items():
+            matches = set()
+            for value in actual if isinstance(actual, list) else [actual]:
+                matches.update(self.preference_terms.get((field, value_key(value)), ()))
+            for uid in matches:
+                counts[uid] += 1
+        candidates = self.unconditional_preferences | {
+            uid for uid, count in counts.items() if count == self.preference_fields[uid]
+        }
+        return {
+            uid
+            for uid in candidates
+            if uid in self.by_project[None] or uid in self.by_project[project_id]
+        }
+
     def eligible(self, project_id, *, active=True):
         scope = self.by_project[None] | self.by_project[project_id]
         return scope & self.by_status["active"] if active else scope
@@ -76,13 +135,13 @@ class OwnerCache:
         budget = max(
             limit * self.policy.candidate_multiplier, self.policy.candidate_floor
         )
-        semantic = dict(self.vectors.search(vector, sorted(ids), min(len(ids), budget)))
+        semantic = dict(self.vectors.search(vector, list(ids), min(len(ids), budget)))
         counts = defaultdict(int)
         query_tokens = tokens(query)
         for token in query_tokens:
             for uid in self.lexical.get(token, set()) & ids:
                 counts[uid] += 1
-        lexical = sorted(counts, key=lambda uid: (-counts[uid], uid))[:budget]
+        lexical = nsmallest(budget, counts, key=lambda uid: (-counts[uid], uid))
         missing = set(lexical) - semantic.keys()
         semantic.update(self.vectors.search(vector, sorted(missing), len(missing)))
         total_weight = self.policy.semantic_weight + self.policy.lexical_weight

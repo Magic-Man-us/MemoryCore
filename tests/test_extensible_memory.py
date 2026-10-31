@@ -720,3 +720,122 @@ async def test_local_embedder_never_downloads_or_executes_remote_code(
         LocalSentenceEmbedder(
             tmp_path / "missing", model_id="local", revision="1", dimensions=2
         )
+
+
+async def test_exact_duplicate_outside_semantic_candidates(service):
+    original = preference(id="z-original", source_refs=["first"])
+    await remember(service, original)
+    # Opposite vectors and no lexical overlap exclude the duplicate from search.
+    duplicate = original.model_copy(update={"id": "new", "source_refs": ["second"]})
+    service.retrieval_policy = service.retrieval_policy.model_copy(
+        update={"minimum_score": 1.0}
+    )
+    service._caches.clear()
+    result = await service.call(
+        RememberRequest(memory=duplicate, embedding=[-1.0, 0.0]), owner_id="alice"
+    )
+    assert result.decision.action == "attach_evidence"
+    assert result.memory.id == original.id
+    assert result.memory.source_refs == ["first", "second"]
+    assert result.memory.revision == 2
+
+
+async def test_indexed_preferences_match_all_fields_once_and_respect_scope(service):
+    await register(service, "editor")
+    await remember(
+        service,
+        preference(
+            id="conditional",
+            applicability={"languages": ["python", "rust"], "editor": ["vim"]},
+        ),
+    )
+    await remember(
+        service, preference(id="global", preference_key="global", applicability={})
+    )
+    await remember(
+        service,
+        preference(
+            id="project",
+            preference_key="project",
+            scope=ProjectScope(project_id="other"),
+            applicability={},
+        ),
+    )
+    context = TaskContext(task_id="task", attributes={"languages": ["python", "rust"]})
+    result = await service.resolve_prefs(context, owner_id="alice")
+    assert {m.id for m in result.effective} == {"global"}
+    context = context.model_copy(
+        update={"attributes": {"languages": ["python", "rust"], "editor": "vim"}}
+    )
+    result = await service.resolve_prefs(context, owner_id="alice")
+    assert {m.id for m in result.effective} == {"global", "conditional"}
+    assert result.complete
+    # Incremental sync removes old applicability postings and exact-content entries.
+    replacement = preference(
+        id="replacement",
+        value="pip",
+        applicability={"languages": ["python", "rust"], "editor": ["vim"]},
+    )
+    await remember(
+        service,
+        replacement,
+        decision=Supersede(target_id="conditional", expected_revision=1),
+        expected_generation=result.generation,
+    )
+    result = await service.resolve_prefs(context, owner_id="alice")
+    assert {m.id for m in result.effective} == {"global", "replacement"}
+    cache = service._caches["alice"]
+    assert "conditional" not in cache.preference_fields
+    assert all("conditional" not in ids for ids in cache.equivalents.values())
+
+
+async def test_preference_index_avoids_reading_unrelated_payloads(service):
+    for i in range(30):
+        await remember(
+            service,
+            preference(
+                id=f"unrelated-{i}",
+                preference_key=f"rule_{i}",
+                applicability={"languages": [f"language_{i}"]},
+            ),
+        )
+    await remember(service, preference(id="wanted"))
+    context = TaskContext(task_id="task", attributes={"languages": ["python"]})
+    await service.resolve_prefs(context, owner_id="alice")
+    cache = service._caches["alice"]
+
+    class GuardedMemories(dict):
+        def __getitem__(self, key):
+            assert key == "wanted", "resolver loaded an unrelated payload"
+            return super().__getitem__(key)
+
+    cache.memories = GuardedMemories(cache.memories)
+    result = await service.resolve_prefs(context, owner_id="alice")
+    assert [m.id for m in result.effective] == ["wanted"]
+
+
+async def test_dream_finds_exact_duplicates_without_semantic_hits(service):
+    first = await remember(service, preference(id="a", source_refs=["one"]))
+    second = await remember(
+        service,
+        preference(id="b", source_refs=["two"]),
+        decision=Create(),
+        expected_generation=first.generation,
+    )
+    service.retrieval_policy = service.retrieval_policy.model_copy(
+        update={"minimum_score": 1.0}
+    )
+    service._caches.clear()
+    planned = await service.dream(
+        owner_id="alice", request=DreamPlanRequest(batch_size=2, neighbors_per_memory=1)
+    )
+    assert len(planned.plan.proposal.changes) == 1
+    assert all(len(group.neighbors) <= 1 for group in planned.plan.groups)
+    await service.apply_dream(planned.plan.id, owner_id="alice")
+    result = await service.resolve_prefs(
+        TaskContext(task_id="task", attributes={"languages": ["python"]}),
+        owner_id="alice",
+    )
+    assert len(result.effective) == 1
+    assert result.effective[0].source_refs == ["one", "two"]
+    assert result.effective[0].updated_at > second.memory.updated_at

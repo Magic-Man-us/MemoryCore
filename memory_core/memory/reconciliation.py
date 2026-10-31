@@ -22,7 +22,8 @@ from .models import (
 )
 
 
-def equivalent(a, b):
+def equivalence_key(memory):
+    """Canonical structured content; lifecycle and evidence do not change identity."""
     excluded = {
         "id",
         "created_at",
@@ -31,9 +32,11 @@ def equivalent(a, b):
         "source_refs",
         "supersedes_id",
     }
-    return json.dumps(
-        a.model_dump(mode="json", exclude=excluded), sort_keys=True
-    ) == json.dumps(b.model_dump(mode="json", exclude=excluded), sort_keys=True)
+    return json.dumps(memory.model_dump(mode="json", exclude=excluded), sort_keys=True)
+
+
+def equivalent(a, b):
+    return equivalence_key(a) == equivalence_key(b)
 
 
 def apply_reconciliation(

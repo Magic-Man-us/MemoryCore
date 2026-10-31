@@ -44,7 +44,7 @@ from .models import (
     TaskContext,
 )
 from .preferences import resolve_preferences
-from .reconciliation import apply_reconciliation, equivalent
+from .reconciliation import apply_reconciliation, equivalence_key, equivalent
 from .store import Store
 
 
@@ -85,9 +85,10 @@ class MemoryService:
             raise EmbeddingError(
                 "embedding model/revision/dimension differs; explicit re-embedding required"
             )
-        cache = self._caches.setdefault(
-            owner, OwnerCache(self.spec.dimensions, self.retrieval_policy)
-        )
+        cache = self._caches.get(owner)
+        if cache is None:
+            cache = OwnerCache(self.spec.dimensions, self.retrieval_policy)
+            self._caches[owner] = cache
         try:
             cache.sync(session, owner, state["generation"])
         except BaseException:
@@ -228,6 +229,18 @@ class MemoryService:
                     )
                     for uid, score in cache.search(memory.summary, vector, ids, 20)
                 ]
+                exact = cache.equivalents.get(equivalence_key(memory), set()) & ids
+                if exact:
+                    uid = min(exact)
+                    if all(hit.memory.id != uid for hit in neighbors):
+                        # Exact structured matches must remain available even when
+                        # semantic scores are zero or the top-k pool is crowded.
+                        neighbors.append(
+                            MemoryHit(
+                                memory=cache.memories[uid].model_copy(deep=True),
+                                score=0.0,
+                            )
+                        )
                 return memory, neighbors, state["generation"]
 
         memory, neighbors, generation = await asyncio.to_thread(inspect)
