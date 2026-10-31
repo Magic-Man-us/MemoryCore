@@ -40,7 +40,9 @@ async def test_sqlite_path_expands_home(tmp_path, monkeypatch):
 
 def test_sqlite_path_wins_over_url(tmp_path):
     db = Database(
-        settings=DatabaseSettings(url="postgresql+psycopg://x@nowhere/db", sqlite_path=":memory:")
+        settings=DatabaseSettings(
+            url="postgresql+psycopg://x@nowhere/db", sqlite_path=":memory:"
+        )
     )
     assert db.is_memory
 
@@ -73,8 +75,9 @@ async def test_in_memory_database_survives_worker_threads(spec):
     traces = await asyncio.gather(*(_remember(system, f"fact {i}") for i in range(20)))
     rows = system.ltm_store.fetch_traces_for_user("alice")
     assert {t.trace_uid for t, _ in rows} == {t.trace_uid for t in traces}
-    result = await system.recall(user_id="alice", query_text="fact", limit=50,
-                                 query_embedding=EMB)
+    result = await system.recall(
+        user_id="alice", query_text="fact", limit=50, query_embedding=EMB
+    )
     assert len(result.ltm_candidates) == 20
     assert len(result.wm_events) == 20
 

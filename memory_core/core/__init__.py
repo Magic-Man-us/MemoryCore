@@ -2,7 +2,6 @@
 
 from .interfaces import Embedder, MemoryIndex
 from .models import (
-    AssistantMemoryTrace,
     MemoryCandidate,
     MemoryTrace,
     PurgeResult,
@@ -12,7 +11,6 @@ from .models import (
 from .system import MemorySystem
 
 __all__ = [
-    "AssistantMemoryTrace",
     "Embedder",
     "MemoryCandidate",
     "MemoryIndex",

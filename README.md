@@ -1,255 +1,172 @@
 # MemoryCore
 
-A memory engine for AI assistants: SQL persistence with in-RAM vector search, built with
-Rust and exposed to Python via PyO3.
+Local memory for AI agents: typed Python operations, SQLite persistence, indexed
+metadata filtering, and Rust vector search. Retrieve a small set of relevant memories,
+resolve applicable coding preferences, and consolidate overlapping records with an audit trail.
 
-[Explore the MemoryCore website](https://magic-man-us.github.io/MemoryCore/) for the visual
-overview, architecture, performance profile, and quickstart.
+No AWS, hosted vector database, or remote embedding service is required. Supply vectors
+or use an offline local embedder. Python 3.12+ is required; building from source also
+requires Rust.
 
-All runtime queries hit a Rust-backed in-memory index (1-10ms). One SQL database (a local
-SQLite file by default, PostgreSQL if you point the URL at one) persists long-term memory,
-short-term memory, working memory, and the assistant's learned patterns. No services
-required.
-
-## Architecture
-
-```mermaid
-graph TB
-    subgraph MemorySystem
-        direction TB
-        subgraph Query Layer
-            RI[RustMemoryIndex<br><i>Vector search, in RAM</i>]
-            AI[AssistantMemoryIndex<br><i>SMK bitfield filtering</i>]
-        end
-        subgraph "Persistence (one SQL database, SQLite by default)"
-            LTM[LongTermStore<br><i>durable traces + embeddings</i>]
-            STM[ShortTermStore<br><i>TTL'd traces</i>]
-            WM[SqlWorkingMemory<br><i>rolling session events, TTL + cap</i>]
-            AS[AssistantStore<br><i>SMK traces + embeddings</i>]
-        end
-    end
-    LTM -. hydrate .-> RI
-    AS -. hydrate_assistant .-> AI
-```
-
-### Data flow
-
-- **Startup**: `await system.hydrate(user_id)` loads the user's persisted traces into the
-  Rust index; `await system.hydrate_assistant()` does the same for the SMK index.
-- **Query**: `recall` searches the in-RAM index only, then bumps each hit's access count
-  (in RAM and in the database) and attaches the STM/WM sidebands.
-- **Write**: `remember` validates, persists, then publishes to the index. Input the index
-  would reject (a wrong embedding dimension) never reaches the database, a failed
-  database write leaves the index untouched, and a trace is never searchable before it
-  is durable. Assistant writes follow the same order, serialized per system.
-- **Forget**: `forget(trace_uid)` removes the trace from the index (freeing its memory),
-  LTM, STM, and any working-memory events linked to it.
-
-Store I/O and Rust search run in worker threads with the GIL released, so an async
-caller's event loop never blocks.
-
-## Requirements
-
-- Python >= 3.12
-- Rust toolchain (only when building from source)
-
-That's the whole list. SQLite ships with Python; PostgreSQL is optional (`.[postgres]`).
-
-## Installation
+## Install and run
 
 ```bash
-git clone https://github.com/Magic-Man-us/MemoryCore && cd MemoryCore
-uv venv && source .venv/bin/activate
+git clone https://github.com/Magic-Man-us/MemoryCore
+cd MemoryCore
+uv venv
 uv pip install -e ".[dev]"
-maturin develop --uv
+uv run maturin develop --release --uv
+uv run python examples/typed_memory.py
 ```
 
-## Quick start
+The example stores a preference, loads it before a coding action, searches by tool,
+and prepares a dream pass. It uses explicitly supplied toy vectors so it runs offline.
+For real semantic retrieval, use a real embedding model consistently for writes and queries.
+
+## Typed operations
 
 ```python
 import asyncio
-from memory_core import build_memory_system
+from memory_core import EmbeddingSpec, build_memory_system
+from memory_core.memory.models import PreferenceMemory, RememberRequest, TaskContext
 
 async def main():
-    # Local SQLite file + auto-created schema; zero configuration.
-    system = build_memory_system(sqlite_path="~/.my-assistant/memory.db")
-
-    await system.remember(
-        user_id="alice",
-        summary="Prefers Python for scripting tasks",
-        importance=0.8,
-        tags=["preferences", "programming"],
-        embedding=[0.1, 0.2, ...],   # from your embedding model
+    system = build_memory_system(
+        sqlite_path="./memory.db",
+        embedding_spec=EmbeddingSpec(model_id="example-only", revision="1", dimensions=3),
     )
-
-    result = await system.recall(
-        user_id="alice",
-        query_text="programming languages",
-        limit=5,
-        query_embedding=[0.15, 0.25, ...],
+    await system.call(
+        RememberRequest(
+            memory=PreferenceMemory(
+                summary="Use uv for Python dependencies.",
+                preference_key="python.package_manager",
+                value="uv",
+                applicability={"languages": ["python"]},
+                metadata={"languages": ["python"], "tools": ["uv"]},
+                source_refs=["conversation:123"],
+            ),
+            embedding=[1.0, 0.0, 0.0],  # Toy vector for this example only.
+        ),
+        owner_id="alice",  # Taken from trusted application context, never model arguments.
     )
-    print(result.ltm_candidates)
+    preferences = await system.resolve_prefs(
+        TaskContext(task_id="edit-api", attributes={"languages": ["python"]}),
+        owner_id="alice",
+    )
+    print([(p.preference_key, p.value) for p in preferences.effective])
 
 asyncio.run(main())
 ```
 
-### Choosing the database
+`REQUEST_ADAPTER` parses the discriminated operation union; `RESPONSE_ADAPTER` handles
+responses. HTTP, MCP, or SDK wrappers can all call `system.call(request, owner_id=...)`.
+The package provides the shared service, not a running HTTP/MCP server.
 
-| You want | Do |
+| Operation | Behavior |
 |---|---|
-| The default local file (`./memory_core.db`) | `build_memory_system()` |
-| A local file somewhere specific | `build_memory_system(sqlite_path="~/data/memory.db")` (`~` expanded, parent dirs created) |
-| A throwaway in-process database | `build_memory_system(sqlite_path=":memory:")` |
-| PostgreSQL | `build_memory_system(overrides={"db": {"url": "postgresql+psycopg://..."}})` |
+| `remember` | Find neighbors, reconcile, persist atomically |
+| `recall` | Filter authorized records, combine semantic and keyword candidates, return top-k |
+| `resolve_prefs` | Return all applicable active rules and explicit conflicts |
+| `prepare_task_context` | Resolve preferences and issue a task-bound context receipt |
+| `describe_schema` | Discover request/memory schemas and registered fields |
+| `register_metadata_field` | Add a typed field and aliases without changing code |
+| `list_metadata_fields` / `list_metadata_values` | Discover field definitions and paginated vocabulary |
+| `dream_plan` | Inspect bounded neighborhoods and persist a consolidation proposal |
+| `dream_apply` | Atomically apply a current, validated proposal |
 
-`sqlite_path` wins over any URL. The same choices work via environment
-(`MEMORY_DB_SQLITE_PATH`, `MEMORY_DB_URL`) or directly on `Database(sqlite_path=...)`.
-File databases run in WAL mode with a 30 s busy timeout, so a CLI and a daemon can share
-one file. In-memory databases share one connection across worker threads and serialize
-access to it, so they behave like a file database that disappears on exit.
+See [architecture and filtering](docs/architecture.md),
+[agent integration and dreams](docs/agent-memory.md), and the
+[runnable example](examples/typed_memory.py).
 
-### Bring an embedder instead of vectors
+## Extensible metadata
 
-Pass anything satisfying the `Embedder` protocol (`async def embed(texts) -> vectors`) and
-call `remember`/`recall` with raw text, no embeddings at call sites:
+There are no runtime topic, language, or tool enums and no 16-tool bitmask. The default
+field **shapes** include `languages`, `tools`, `topics`, `domains`, `activities`, and
+`frameworks`; their values are unrestricted strings. Register additional fields as
+`keyword`, `keywords`, `number`, or `boolean`. Aliases resolve to a canonical field.
+`kind` and `status` are read-only system fields.
 
-```python
-system = build_memory_system(embedder=MyEmbedder())
-await system.remember(user_id="alice", summary="Timezone is US/Eastern",
-                      importance=0.6, tags=["profile"])
-result = await system.recall(user_id="alice", query_text="what timezone?", limit=5)
+Filtering supports `eq`, `in`, `contains_any`, `contains_all`, `range`, `exists`, `all`,
+and `any`. Unknown fields, incompatible values, and invalid operators fail explicitly.
+An empty list never silently removes a filter. Owner and project eligibility are enforced
+outside the agent's filter expression.
+
+## Automatic context and maintenance
+
+Use `system.service.run_with_context(context, coding_action, owner_id=...)` to load
+preferences before invoking your agent. Editing-tool wrappers can call `validate_context`
+to reject a missing, stale, or differently scoped receipt. Refresh when task attributes
+change. The host must wire these hooks into its SDK/tool execution paths; a standalone
+memory library cannot intercept arbitrary tools or prove that a model obeyed a rule.
+
+Every `dream_after_writes` successful writes (default 100), the service prepares a bounded
+dream proposal. The built-in planner identifies exact structured duplicates. An injected
+async `dream_planner` can propose deeper consolidation and improvements to metadata or
+retrieval. Applying a plan is a separate explicit operation. Model/index recommendations
+are never silently promoted; evaluate them against held-out cases first.
+
+## Local embeddings
+
+```bash
+uv pip install -e ".[local]"
 ```
 
-### Restart persistence
+`LocalSentenceEmbedder` in `memory_core.memory.embedding` loads an **existing local model
+directory**, with downloads and remote model code disabled. Supply its `.spec` as
+`embedding_spec` and the instance as `embedder` to `build_memory_system`.
+The optional model runtime and model weights are not bundled. The core tests use deterministic
+vectors and do not validate a particular pretrained model's semantic quality.
 
-```python
-system = build_memory_system()
-loaded = await system.hydrate("alice")        # LTM -> Rust index
-learned = await system.hydrate_assistant()    # assistant_traces -> SMK index
-```
+Embedding model ID, revision, and dimensions are persisted per owner. Switching to an
+incompatible identity fails even when dimensions match. Re-embedding requires an explicit
+migration into a separately evaluated database; it is not an automatic dream action.
 
-### Forgetting and housekeeping
+## Storage and compatibility
 
-```python
-await system.forget(trace_uid)            # index, LTM, STM, linked WM events
-await system.forget_assistant(trace_uid)  # SMK index + assistant store
-await system.purge_expired()              # expired STM/WM rows for every user
-```
+SQLite is the supported backend for the new typed service. `sqlite_path=":memory:"` gives
+an ephemeral database; a file persists across restarts. Queries automatically hydrate
+changed records into per-owner indexes. Writes use SQLite transactions and generation/revision
+checks, including when multiple service instances share the database.
 
-## Scoring
+Version 0.4 removes the SMK assistant API and its fixed enums. **Existing tables are retained**;
+use the [migration guide](docs/migration-0.4.md) to import them. Unscoped historical assistant
+records require an explicit owner assignment. Imported records retain an archival copy of
+their complete original payload.
 
-Each candidate is scored as
+The existing user `remember`/`recall`/`hydrate` API, working memory, and short-term stores
+remain available; see [legacy user API](docs/legacy-user-api.md). That API still supports
+optional PostgreSQL. Its records are separate from the typed store until explicitly imported.
 
-```
-semantic * cosine + importance * importance
-  + recency * 0.5 ** (age / half_life)
-  + access  * a / (1 + a),   a = ln(1 + access_count)
-```
+## Measured performance
 
-The defaults (`semantic=0.7`, `importance=0.3`, `recency=0`, `access=0`) are the original
-semantic + importance score, so ranking does not change unless you opt in:
+A local synthetic run with **50,000 records and 384-dimensional vectors**, using 30 warm
+queries, measured approximately:
 
-```python
-system = build_memory_system(overrides={
-    "scoring": {"semantic": 0.6, "importance": 0.2, "recency": 0.15, "access": 0.05,
-                "recency_half_life_days": 30},
-})
-```
+| Operation | Median | p95 |
+|---|---:|---:|
+| Unfiltered recall | 152 ms | 202 ms |
+| Recall filtered to about 500 records | 12 ms | 16 ms |
 
-Ties break newer-first, then by trace uid, so results are deterministic.
+Cold recall including hydration took 9.2 seconds. Process peak RSS was about 371 MiB,
+including fixture construction. Each query returned at most five memories; all 12 matching
+preference rules were returned independently of top-k.
 
-## SMK (Structured Memory Key) assistant index
-
-The assistant-level index packs structured metadata into a 64-bit key for fast bitfield
-filtering before cosine similarity:
-
-```
-bits  0-7:   topic (TopicBucket, any 1..=255)
-bits  8-10:  kind (MemoryKind)
-bits 11-26:  tool_mask (16-bit ToolFlag mask)
-bits 27-28:  difficulty (Level2Bits)
-bits 29-30:  generality (Level2Bits)
-bits 31-32:  importance (Level2Bits)
-```
-
-Topic and tool meanings live only in Python (`TopicBucket`, `ToolFlag`); Rust treats them
-as validated integers, so adding a topic is a one-line Python change.
-
-```python
-from memory_core import AssistantMemoryTrace, MemoryKind, ToolFlag, TopicBucket
-
-system = build_memory_system(overrides={
-    "enable_assistant_index": True,
-    "assistant_index_dim": 384,
-})
-
-trace = await system.remember_assistant(trace=AssistantMemoryTrace(...), embedding=[...])
-trace.smk_raw   # the packed key, set on ingest
-hits = await system.recall_assistant(
-    query_embedding=[...], k=5,
-    topic=TopicBucket.RUST_PYTHON_TOOLCHAIN,
-    required_tools={ToolFlag.RS, ToolFlag.PY},
-    allowed_kinds=[MemoryKind.PATTERN, MemoryKind.ANTI_PATTERN],
-)
-```
-
-Re-remembering a `trace_uid` replaces it. `recall_assistant` defaults to
-PATTERN/ANTI_PATTERN with at least MEDIUM generality and importance; pass
-`allowed_kinds=list(MemoryKind), min_generality=None, min_importance=None` to search
-everything. `remember_assistant` raises if the assistant index is not enabled.
-
-## Project structure
-
-```
-MemoryCore/
-├── src/                      # Rust implementation
-│   ├── lib.rs                # Conversation engine + PyO3 bindings (memory_core._native)
-│   └── smk_index.rs          # Structured Memory Key index
-├── memory_core/              # Python package (ships in the wheel with the extension)
-│   ├── core/                 # Protocols, models, MemorySystem orchestrator
-│   ├── storage/              # Database, LTM, STM, working memory, assistant store
-│   ├── indexing/             # RustMemoryIndex, AssistantMemoryIndex wrappers
-│   └── types/                # SMK enums and feature extraction
-├── examples/                 # Runnable usage examples
-├── tests/                    # pytest suite
-└── docs/                     # Architecture + review documentation
-```
-
-## Configuration
-
-Everything has a working default; environment variables override, and programmatic
-`overrides` (validated; unknown keys raise) beat the environment:
-
-| Variable | Default | Description |
-|---|---|---|
-| `MEMORY_DB_SQLITE_PATH` | unset | Local SQLite file (or `:memory:`); wins over the URL |
-| `MEMORY_DB_URL` | `sqlite:///memory_core.db` | SQLAlchemy URL for the single database |
-| `MEMORY_CORE_WM_TTL_SECONDS` | `3600` | Working-memory event TTL |
-| `MEMORY_CORE_WM_MAX_EVENTS` | `500` | Per-user working-memory cap |
-| `MEMORY_CORE_STM_TTL_SECONDS` | `900` | Short-term trace TTL |
-| `MEMORY_CORE_ENABLE_STM` | `false` | Enable the STM layer |
-| `MEMORY_CORE_ENABLE_ASSISTANT_INDEX` | `false` | Enable the SMK assistant index |
-| `MEMORY_CORE_ASSISTANT_INDEX_DIM` | unset | Assistant index dimension (required when enabled) |
-| `MEMORY_CORE_SCORING__<FIELD>` | see Scoring | `SEMANTIC`, `IMPORTANCE`, `RECENCY`, `ACCESS`, `RECENCY_HALF_LIFE_DAYS` |
-
-```python
-system = build_memory_system(overrides={
-    "db": {"url": "postgresql+psycopg://memory:secret@db.example.com/memories"},
-    "enable_stm": True,
-})
-```
+These are measurements from one container, not latency guarantees or a semantic-quality
+benchmark. Reproduce with `uv run python benchmarks/memory_scale.py`. Compare retrieval
+configurations using `memory_core.memory.evaluation.evaluate_retrieval` and your own labeled
+queries before changing models or adding approximate search.
 
 ## Development
 
 ```bash
 cargo clippy --all-targets -- -D warnings
-cargo test                 # Rust unit tests
-maturin develop --uv
-pytest                     # Python suite (real Rust engine, temp SQLite)
+cargo test
+uv run pytest -q
+uv run python examples/typed_memory.py
 ```
 
-CI runs all of the above plus the examples on Python 3.12 and 3.13.
+CI exercises Rust, Python 3.12/3.13, and the examples. The scale benchmark is manual and
+requires no additional CI service. The [project website](https://magic-man-us.github.io/MemoryCore/)
+contains the earlier visual overview; this README and the linked docs describe the 0.4 API.
 
-## License
-
-MIT
+Package metadata declares the MIT license.
