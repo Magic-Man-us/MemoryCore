@@ -8,62 +8,20 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from memory_core import (
-    AssistantMemoryTrace,
-    MemoryCandidate,
-    MemoryKind,
-    MemoryTrace,
-    ToolFlag,
-    TopicBucket,
-)
-from tests.conftest import make_assistant_trace, make_trace
-
-
-class TestAssistantMemoryTrace:
-    def test_instantiates(self):
-        """P0-2: the SMK enums must be importable at runtime for Pydantic to build the model."""
-        trace = AssistantMemoryTrace(
-            trace_uid="t1",
-            context_topic=TopicBucket.RUST_PYTHON_TOOLCHAIN,
-            context_activity="debugging",
-            context_complexity=0.5,
-            kind=MemoryKind.PATTERN,
-            tools={ToolFlag.RS, ToolFlag.PY},
-            summary="s",
-            rationale="r",
-            before_state_confusion=0.2,
-            after_state_confidence=0.9,
-            generality=0.5,
-            importance=0.8,
-        )
-        assert trace.context_topic is TopicBucket.RUST_PYTHON_TOOLCHAIN
-        assert ToolFlag.RS in trace.tools
-
-    @pytest.mark.parametrize(
-        "field", ["context_complexity", "before_state_confusion", "generality", "importance"]
-    )
-    @pytest.mark.parametrize("bad", [-0.1, 1.1])
-    def test_unit_interval_fields_are_bounded(self, field: str, bad: float):
-        with pytest.raises(ValidationError):
-            make_assistant_trace(**{field: bad})
-
-    def test_defaults(self):
-        trace = make_assistant_trace()
-        assert trace.access_count == 0
-        assert trace.smk_raw is None
-        assert trace.created_at.tzinfo is not None
+from memory_core import MemoryCandidate, MemoryTrace
+from tests.conftest import make_trace
 
 
 class TestMemoryTrace:
     def test_importance_bounded(self):
         """importance feeds the ranking score directly; out-of-range values must be rejected."""
-        kwargs = dict(
-            trace_uid="t",
-            user_id="u",
-            content="",
-            summary="s",
-            created_at=datetime.now(UTC),
-        )
+        kwargs = {
+            "trace_uid": "t",
+            "user_id": "u",
+            "content": "",
+            "summary": "s",
+            "created_at": datetime.now(UTC),
+        }
         with pytest.raises(ValidationError):
             MemoryTrace(importance=7.3, **kwargs)
         with pytest.raises(ValidationError):
@@ -92,7 +50,7 @@ class TestMemoryTrace:
         assert isinstance(args[6], list)
 
     def test_tags_deduplicate_as_a_set(self):
-        trace = make_trace(tags={"a", "a", "b"})
+        trace = make_trace(tags={"a", "b"})
         assert trace.tags == {"a", "b"}
 
 

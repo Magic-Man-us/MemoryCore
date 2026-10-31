@@ -48,7 +48,9 @@ class ShortTermStore:
         """Remove one trace. Returns True when a row was deleted."""
         with self._db.session_scope() as session:
             result = session.execute(
-                delete(ShortTermTraceORM).where(ShortTermTraceORM.trace_uid == trace_uid)
+                delete(ShortTermTraceORM).where(
+                    ShortTermTraceORM.trace_uid == trace_uid
+                )
             )
             session.commit()
             return bool(result.rowcount)

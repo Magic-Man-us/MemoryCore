@@ -1,3 +1,5 @@
+> Historical pre-0.4 review. SMK APIs described below have been replaced; see [current architecture](architecture.md) and [migration](migration-0.4.md).
+
 # MemoryCore review — readiness for driving Junovera's memory system
 
 > **Update (2026-10-24, v0.3.0): every item below is closed.** Remaining items landed:

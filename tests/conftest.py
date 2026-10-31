@@ -6,27 +6,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from memory_core import AssistantMemoryTrace, MemoryKind, MemoryTrace, ToolFlag, TopicBucket
+from memory_core import MemoryTrace
 from memory_core.storage import Database, DatabaseSettings
-
-
-def make_assistant_trace(**overrides) -> AssistantMemoryTrace:
-    defaults = dict(
-        trace_uid="a-1",
-        context_topic=TopicBucket.RUST_PYTHON_TOOLCHAIN,
-        context_activity="debugging",
-        context_complexity=0.5,
-        kind=MemoryKind.PATTERN,
-        summary="maturin builds need the venv python",
-        rationale="PATH isolation",
-        before_state_confusion=0.8,
-        after_state_confidence=0.9,
-        generality=0.6,
-        tools={ToolFlag.PY, ToolFlag.MATURIN},
-        importance=0.9,
-    )
-    defaults.update(overrides)
-    return AssistantMemoryTrace(**defaults)
 
 
 def make_trace(

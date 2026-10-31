@@ -1,28 +1,13 @@
-"""MemorySystem: the async orchestrator over the index, the SQL stores, and working memory.
-
-The stores are synchronous SQLAlchemy and the Rust engines release the GIL; every
-call here runs in a worker thread (``asyncio.to_thread``) so the caller's event loop
-(a streaming assistant turn) never blocks on database I/O or vector search.
-
-Consistency rule: LTM (and the assistant store) is the source of truth and the
-in-RAM indexes mirror it. Writes validate first, persist second, and publish to the
-index last: input the index would reject (a wrong embedding dimension) is never
-persisted, a failed persist leaves the index untouched (including the previous
-version of an updated trace), and a trace is never searchable before it is durable.
-"""
+"""Compatibility user-memory orchestrator and entry point to the typed service."""
 
 from __future__ import annotations
 
 import asyncio
-import threading
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from memory_core.types.smk_types import Level2Bits, MemoryKind, ToolFlag, TopicBucket
-
 from .models import (
-    AssistantMemoryTrace,
     MemoryCandidate,
     MemoryTrace,
     PurgeResult,
@@ -33,16 +18,9 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from memory_core.core.interfaces import Embedder, MemoryIndex
-    from memory_core.indexing.assistant_index import (
-        AssistantMemoryHit,
-        AssistantMemoryIndex,
-    )
-    from memory_core.storage.assistant_store import AssistantStore
     from memory_core.storage.ltm_store import LongTermStore
     from memory_core.storage.stm_store import ShortTermStore
     from memory_core.storage.working_mem import SqlWorkingMemory
-
-DEFAULT_ASSISTANT_KINDS: tuple[MemoryKind, ...] = (MemoryKind.PATTERN, MemoryKind.ANTI_PATTERN)
 
 
 class MemorySystem:
@@ -55,8 +33,6 @@ class MemorySystem:
         working_mem: SqlWorkingMemory,
         ltm_store: LongTermStore,
         embedder: Embedder | None = None,
-        assistant_index: AssistantMemoryIndex | None = None,
-        assistant_store: AssistantStore | None = None,
         stm_store: ShortTermStore | None = None,
         stm_ttl_seconds: int = 900,
     ) -> None:
@@ -64,13 +40,23 @@ class MemorySystem:
         self.working_mem = working_mem
         self.ltm_store = ltm_store
         self.embedder = embedder
-        self.assistant_index = assistant_index
-        self.assistant_store = assistant_store
         self.stm_store = stm_store
         self._stm_ttl_seconds = stm_ttl_seconds
-        # Serializes each assistant write (validate, persist, publish) so two
-        # concurrent upserts of one uid cannot leave the index and store disagreeing.
-        self._assistant_lock = threading.Lock()
+        self.service = None
+
+    async def call(self, request, *, owner_id: str):
+        if self.service is None:
+            raise RuntimeError(
+                "configure embedding_spec to enable typed memory operations"
+            )
+        return await self.service.call(request, owner_id=owner_id)
+
+    async def resolve_prefs(self, context, *, owner_id: str):
+        if self.service is None:
+            raise RuntimeError(
+                "configure embedding_spec to enable preference resolution"
+            )
+        return await self.service.resolve_prefs(context, owner_id=owner_id)
 
     # --- Startup -----------------------------------------------------------
 
@@ -88,28 +74,6 @@ class MemorySystem:
                 if embedding:
                     self.memory_index.ingest(trace, embedding)
                     loaded += 1
-            return loaded
-
-        return await asyncio.to_thread(_load)
-
-    async def hydrate_assistant(self) -> int:
-        """Load every persisted assistant trace into the SMK index.
-
-        Returns the number ingested; 0 when the assistant index or store is not
-        configured (like ``recall_assistant``, reads never raise for a disabled index).
-        """
-        index = self.assistant_index
-        store = self.assistant_store
-        if index is None or store is None:
-            return 0
-
-        def _load() -> int:
-            loaded = 0
-            with self._assistant_lock:
-                for trace, embedding in store.fetch_all():
-                    if embedding:
-                        index.ingest(trace, embedding)
-                        loaded += 1
             return loaded
 
         return await asyncio.to_thread(_load)
@@ -146,7 +110,9 @@ class MemorySystem:
             extra=dict(extra) if extra else {},
         )
 
-        emb_list = await self._resolve_embedding(embedding, f"{summary}\n{content}".strip())
+        emb_list = await self._resolve_embedding(
+            embedding, f"{summary}\n{content}".strip()
+        )
 
         def _persist() -> None:
             # Validate, persist, then publish: a rejected embedding never reaches
@@ -262,100 +228,13 @@ class MemorySystem:
 
         def _purge() -> PurgeResult:
             return PurgeResult(
-                stm_traces=self.stm_store.purge_expired() if self.stm_store is not None else 0,
+                stm_traces=self.stm_store.purge_expired()
+                if self.stm_store is not None
+                else 0,
                 wm_events=self.working_mem.purge_expired(),
             )
 
         return await asyncio.to_thread(_purge)
-
-    # --- Assistant memory (SMK index) --------------------------------------
-
-    async def remember_assistant(
-        self,
-        *,
-        trace: AssistantMemoryTrace,
-        embedding: Iterable[float] | None = None,
-    ) -> AssistantMemoryTrace:
-        """Persist an assistant trace and index it (upsert by ``trace_uid``).
-
-        Sets ``trace.smk_raw``. Raises RuntimeError when the assistant index is not
-        enabled: silently dropping a write would lose what the assistant learned.
-        If persisting fails, the index (and any previous version of the trace in
-        it) is left untouched.
-        """
-        index = self._require_assistant_index()
-        emb_list = await self._resolve_embedding(
-            embedding, f"{trace.summary}\n{trace.rationale}".strip()
-        )
-
-        def _persist() -> None:
-            with self._assistant_lock:
-                validated = index.prepare(trace, emb_list)
-                if self.assistant_store is not None:
-                    self.assistant_store.upsert_trace(trace, embedding=validated)
-                index.ingest(trace, validated)
-
-        await asyncio.to_thread(_persist)
-        return trace
-
-    async def forget_assistant(self, trace_uid: str) -> bool:
-        """Remove an assistant trace from the SMK index and the store."""
-        index = self._require_assistant_index()
-
-        def _forget() -> bool:
-            with self._assistant_lock:
-                removed = index.remove(trace_uid)
-                if self.assistant_store is not None:
-                    removed = self.assistant_store.delete_trace(trace_uid) or removed
-                return removed
-
-        return await asyncio.to_thread(_forget)
-
-    async def recall_assistant(
-        self,
-        *,
-        k: int,
-        query_text: str = "",
-        query_embedding: Iterable[float] | None = None,
-        topic: TopicBucket | None = None,
-        required_tools: set[ToolFlag] | None = None,
-        allowed_kinds: list[MemoryKind] | None = None,
-        min_generality: Level2Bits | None = Level2Bits.MEDIUM,
-        min_importance: Level2Bits | None = Level2Bits.MEDIUM,
-    ) -> list[AssistantMemoryHit]:
-        """Query the assistant index with SMK-aware filters.
-
-        Defaults favour reusable guidance: kinds PATTERN/ANTI_PATTERN and at least
-        MEDIUM generality and importance. Pass ``allowed_kinds=list(MemoryKind)``
-        and ``None`` for the minimums to search everything. Returns [] when the
-        assistant index is not enabled.
-        """
-        if self.assistant_index is None:
-            return []
-        index = self.assistant_index
-        emb_list = await self._resolve_embedding(query_embedding, query_text)
-        kinds = list(allowed_kinds) if allowed_kinds else list(DEFAULT_ASSISTANT_KINDS)
-
-        return await asyncio.to_thread(
-            index.query,
-            emb_list,
-            k,
-            topic=topic,
-            required_tools=required_tools or set(),
-            allowed_kinds=kinds,
-            min_generality=min_generality,
-            min_importance=min_importance,
-        )
-
-    # --- Internals ---------------------------------------------------------
-
-    def _require_assistant_index(self) -> AssistantMemoryIndex:
-        if self.assistant_index is None:
-            raise RuntimeError(
-                "assistant index is not enabled: build with enable_assistant_index=True "
-                "and assistant_index_dim"
-            )
-        return self.assistant_index
 
     async def _resolve_embedding(
         self,

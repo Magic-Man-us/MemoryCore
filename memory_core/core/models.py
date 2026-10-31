@@ -1,62 +1,11 @@
-"""Pydantic contracts for traces, candidates, and recall results.
-
-The SMK enums are imported at runtime on purpose: Pydantic evaluates field
-annotations when the model class is built, so moving these under TYPE_CHECKING
-leaves ``AssistantMemoryTrace`` permanently "not fully defined"
-(see docs/review-junovera-integration.md, P0-2).
-"""
+"""Legacy user-memory boundary models; typed 0.4 records live in memory.models."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
-
-# NOTE: runtime imports on purpose — these enums are pydantic *field types* on
-# AssistantMemoryTrace, so hiding them behind TYPE_CHECKING leaves the model
-# permanently "not fully defined" and unusable at runtime.
-from memory_core.types.smk_types import MemoryKind, ToolFlag, TopicBucket  # noqa: TC001
-
-
-class AssistantMemoryTrace(BaseModel):
-    """Normalized record describing a single assistant-focused learning trace."""
-
-    model_config = ConfigDict(frozen=False)
-
-    trace_uid: str
-
-    # situation / context
-    context_topic: TopicBucket
-    context_activity: str = Field(description="e.g. 'debugging', 'designing', 'explaining'")
-    context_artifacts: list[str] = Field(default_factory=list)
-    context_complexity: float = Field(ge=0.0, le=1.0)
-
-    # what we actually learned
-    kind: MemoryKind
-    summary: str
-    rationale: str
-    before_state_confusion: float = Field(ge=0.0, le=1.0)
-    after_state_confidence: float = Field(ge=0.0, le=1.0)
-    generality: float = Field(ge=0.0, le=1.0)
-
-    # "cues" for when this should fire again
-    tools: set[ToolFlag] = Field(default_factory=set)
-    languages: list[str] = Field(default_factory=list)
-    domains: list[str] = Field(default_factory=list)
-    trigger_smells: list[str] = Field(
-        default_factory=list,
-        description="Patterns like 'tool isolated PATH', 'version mismatch', etc.",
-    )
-
-    # meta
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    importance: float = Field(ge=0.0, le=1.0)
-    access_count: int = 0
-    extra: dict[str, Any] = Field(default_factory=dict)
-
-    # the packed 64-bit StructuredMemoryKey; set by the index on ingest
-    smk_raw: int | None = None
 
 
 class MemoryTrace(BaseModel):

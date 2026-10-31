@@ -68,7 +68,10 @@ class LongTermStore:
         )
         with self._db.session_scope() as session:
             rows = session.execute(stmt).scalars().all()
-            return [(self._row_to_trace(row), decode_embedding(row.embedding)) for row in rows]
+            return [
+                (self._row_to_trace(row), decode_embedding(row.embedding))
+                for row in rows
+            ]
 
     def increment_access(self, trace_uids: Iterable[str]) -> int:
         """Add one to ``access_count`` for each trace; returns the rows updated."""

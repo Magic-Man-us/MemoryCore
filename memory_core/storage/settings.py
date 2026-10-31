@@ -24,7 +24,9 @@ SQLITE_MEMORY = ":memory:"
 DATABASE_CONNECTION_KEYS = {"url", "sqlite_path"}
 
 
-def filter_overrides(overrides: dict[str, Any] | None, allowed: set[str]) -> dict[str, Any]:
+def filter_overrides(
+    overrides: dict[str, Any] | None, allowed: set[str]
+) -> dict[str, Any]:
     """Keep only known override keys with non-None values."""
     if not overrides:
         return {}
@@ -63,7 +65,9 @@ class DatabaseSettings(BaseSettings):
         return self.url
 
     @classmethod
-    def from_overrides(cls, overrides: dict[str, Any] | None = None) -> DatabaseSettings:
+    def from_overrides(
+        cls, overrides: dict[str, Any] | None = None
+    ) -> DatabaseSettings:
         """Construct from env with explicit overrides taking precedence.
 
         An explicit ``url`` with no ``sqlite_path`` clears any env-provided

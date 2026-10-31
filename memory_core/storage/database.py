@@ -14,9 +14,9 @@ from __future__ import annotations
 import json
 import threading
 from contextlib import contextmanager, nullcontext
-from datetime import datetime  # noqa: TC003 — runtime-required by Mapped[] resolution
+from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from sqlalchemy import (
     BigInteger,
@@ -96,7 +96,7 @@ class WorkingMemoryEventORM(Base):
 
 
 class AssistantTraceORM(Base):
-    """Assistant-level learning traces for the SMK index (``assistant_traces``).
+    """Historical assistant records retained for the explicit 0.4 importer.
 
     ``payload`` is the full ``AssistantMemoryTrace`` as JSON; ``smk_raw`` is the
     packed key, stored for inspection and ad-hoc SQL.
@@ -126,15 +126,14 @@ def _backfill_wm_trace_uids(connection: Connection) -> None:
         if isinstance(uid, str):
             updates.append({"id": row_id, "uid": uid})
     if updates:
-        connection.execute(text("UPDATE wm_events SET trace_uid = :uid WHERE id = :id"), updates)
+        connection.execute(
+            text("UPDATE wm_events SET trace_uid = :uid WHERE id = :id"), updates
+        )
 
 
 def _is_sqlite_memory(url: URL) -> bool:
     database = url.database
-    return (
-        database in (None, "", SQLITE_MEMORY)
-        or url.query.get("mode") == "memory"
-    )
+    return database in (None, "", SQLITE_MEMORY) or url.query.get("mode") == "memory"
 
 
 class Database:
@@ -189,7 +188,7 @@ class Database:
         ("wm_events", "trace_uid", "TEXT"),
     )
     # Data fix-ups run in the same transaction as the column they follow.
-    _BACKFILLS: dict[tuple[str, str], Callable[[Connection], None]] = {
+    _BACKFILLS: ClassVar[dict[tuple[str, str], Callable[[Connection], None]]] = {
         ("wm_events", "trace_uid"): _backfill_wm_trace_uids,
     }
 

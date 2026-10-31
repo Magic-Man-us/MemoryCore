@@ -30,7 +30,9 @@ async def test_remember_recall_roundtrip(system):
     )
     assert trace.trace_uid
 
-    result = await system.recall(user_id="alice", query_text="uv pip preference", limit=5)
+    result = await system.recall(
+        user_id="alice", query_text="uv pip preference", limit=5
+    )
     assert [c.trace_uid for c in result.ltm_candidates] == [trace.trace_uid]
     # the remember() call also left a working-memory event
     assert any(e.get("kind") == "ltm_trace" for e in result.wm_events)
@@ -51,7 +53,9 @@ async def test_working_memory_can_be_skipped_on_remember(system):
 
 
 async def test_working_memory_can_be_excluded_on_recall(system):
-    await system.remember(user_id="alice", summary="noisy write", importance=0.5, tags=[])
+    await system.remember(
+        user_id="alice", summary="noisy write", importance=0.5, tags=[]
+    )
     result = await system.recall(
         user_id="alice", query_text="noisy write", limit=5, include_working_mem=False
     )

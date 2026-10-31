@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "memory_core"
-version = "0.3.0"
+version = "0.4.0"
 description = "Rust-backed memory engine for AI assistants: SQL persistence, in-RAM vector search"
 requires-python = ">=3.12"
 authors = [
@@ -29,6 +29,9 @@ dev = [
     "maturin>=1.10.1",
     "pytest>=9.0.3",
     "pytest-asyncio>=0.24",
+]
+local = [
+    "sentence-transformers>=5,<6",
 ]
 postgres = [
     "psycopg[binary]>=3.2.0",

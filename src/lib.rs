@@ -3,8 +3,7 @@
 //! - [`PyMemoryEngine`]: per-user conversation memory. Tag/keyword candidate seeding,
 //!   then a weighted score over cosine similarity, importance, recency, and access
 //!   frequency.
-//! - [`PyAssistantMemoryIndex`]: assistant-level memory, filtered by a packed
-//!   Structured Memory Key before cosine (see `smk_index`).
+//! - [`PyVectorIndex`]: generic exact vector ranking over caller-selected IDs.
 //!
 //! Concurrency: every engine lives behind an `RwLock`, and every lock acquisition
 //! happens with the GIL released (`Python::detach`). Python threads (the stores run
@@ -18,12 +17,10 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-mod smk_index;
-
-use smk_index::{
-    score_cmp_desc, top_k, validate_topic, Level2Bits, MemoryKind, SmkEntry, SmkIndex, SmkQuery,
-    StructuredMemoryKey,
-};
+mod ranking;
+mod vector_index;
+use ranking::{score_cmp_desc, top_k};
+use vector_index::PyVectorIndex;
 
 const SECONDS_PER_DAY: f64 = 86_400.0;
 
@@ -318,9 +315,8 @@ impl MemoryEngine {
     }
 
     /// Core search:
-    /// 1. Seed candidates from tags + keywords, restricted to this user's traces
-    ///    (so other users' matches can never suppress the fallback).
-    /// 2. If fewer seeds than `limit`, fall back to all of the user's traces.
+    /// 1. Search all of this user's vectors so lexical matches cannot hide semantic hits.
+    /// 2. Extensible retrieval combines separate semantic and lexical result lists.
     /// 3. Score with the configured weights; return the top `limit`, ties broken by
     ///    newer first, then trace uid.
     fn search_candidates(
@@ -345,23 +341,10 @@ impl MemoryEngine {
             return Ok(Vec::new());
         };
 
-        let mut seeds: HashSet<usize> = HashSet::new();
-        let tag_hits = query
-            .tags
-            .iter()
-            .filter_map(|tag| self.tag_index.get(&Self::normalize_tag(tag)));
-        let keyword_hits = Self::tokenize(&query.text)
-            .into_iter()
-            .filter_map(|token| self.keyword_index.get(&token));
-        for postings in tag_hits.chain(keyword_hits) {
-            seeds.extend(postings.iter().filter(|idx| user_traces.contains(idx)));
-        }
-
-        let pool: Box<dyn Iterator<Item = usize>> = if seeds.len() < query.limit {
-            Box::new(user_traces.iter().copied())
-        } else {
-            Box::new(seeds.into_iter())
-        };
+        // Semantic retrieval must not be suppressed by keyword matches.
+        // Structured filtering belongs to the metadata index; these are ranking cues.
+        let _lexical_context = (&query.text, &query.tags);
+        let pool = user_traces.iter().copied();
 
         let mut scored: Vec<Candidate> = pool
             .map(|idx| {
@@ -528,7 +511,12 @@ impl PyMemoryEngine {
         };
         let now = now.unwrap_or_else(unix_now);
         py.detach(|| read_lock(&self.inner).search_candidates(query, &query_embedding, now))
-            .map(|candidates| candidates.into_iter().map(PyMemoryCandidate::from).collect())
+            .map(|candidates| {
+                candidates
+                    .into_iter()
+                    .map(PyMemoryCandidate::from)
+                    .collect()
+            })
             .map_err(PyValueError::new_err)
     }
 
@@ -544,184 +532,13 @@ impl PyMemoryEngine {
     }
 }
 
-// --- Python bindings: assistant (SMK) index -----------------------------------
-
-/// Validate SMK fields and pack them into a key (ValueError on an invalid value).
-fn build_key(
-    topic: u8,
-    kind: u8,
-    tool_mask: u16,
-    difficulty: u8,
-    generality: u8,
-    importance: u8,
-) -> PyResult<StructuredMemoryKey> {
-    Ok(StructuredMemoryKey::new(
-        validate_topic(topic).map_err(PyValueError::new_err)?,
-        MemoryKind::try_from(kind).map_err(PyValueError::new_err)?,
-        tool_mask,
-        Level2Bits::try_from(difficulty).map_err(PyValueError::new_err)?,
-        Level2Bits::try_from(generality).map_err(PyValueError::new_err)?,
-        Level2Bits::try_from(importance).map_err(PyValueError::new_err)?,
-    ))
-}
-
-/// Pack SMK fields into the raw 64-bit key without touching any index.
-///
-/// The single source of truth for the bit layout; raises ValueError on an
-/// invalid discriminant, so it doubles as pre-persistence validation.
-#[pyfunction]
-pub fn pack_smk(
-    topic: u8,
-    kind: u8,
-    tool_mask: u16,
-    difficulty: u8,
-    generality: u8,
-    importance: u8,
-) -> PyResult<u64> {
-    build_key(topic, kind, tool_mask, difficulty, generality, importance).map(|k| k.raw())
-}
-
-#[pyclass(frozen, module = "memory_core._native")]
-pub struct PySmkQuery {
-    inner: SmkQuery,
-}
-
-#[pymethods]
-impl PySmkQuery {
-    /// Build a filter. Unknown discriminants raise ValueError rather than being
-    /// coerced: a bad filter must fail loudly, not quietly match the wrong memories.
-    #[new]
-    #[pyo3(signature = (
-        topic = None,
-        required_tools_mask = 0,
-        allowed_kinds = None,
-        min_generality = None,
-        min_importance = None
-    ))]
-    pub fn new(
-        topic: Option<u8>,
-        required_tools_mask: u16,
-        allowed_kinds: Option<Vec<u8>>,
-        min_generality: Option<u8>,
-        min_importance: Option<u8>,
-    ) -> PyResult<Self> {
-        let topic = topic
-            .map(validate_topic)
-            .transpose()
-            .map_err(PyValueError::new_err)?;
-        let allowed_kinds = allowed_kinds
-            .map(|ks| {
-                ks.into_iter()
-                    .map(MemoryKind::try_from)
-                    .collect::<Result<Vec<_>, _>>()
-            })
-            .transpose()
-            .map_err(PyValueError::new_err)?;
-        let min_generality = min_generality
-            .map(Level2Bits::try_from)
-            .transpose()
-            .map_err(PyValueError::new_err)?;
-        let min_importance = min_importance
-            .map(Level2Bits::try_from)
-            .transpose()
-            .map_err(PyValueError::new_err)?;
-
-        Ok(PySmkQuery {
-            inner: SmkQuery {
-                topic,
-                required_tools_mask,
-                allowed_kinds,
-                min_generality,
-                min_importance,
-            },
-        })
-    }
-}
-
-#[pyclass(frozen, module = "memory_core._native")]
-pub struct PyAssistantMemoryIndex {
-    inner: RwLock<SmkIndex>,
-}
-
-#[pymethods]
-impl PyAssistantMemoryIndex {
-    #[new]
-    pub fn new(dim: usize) -> PyResult<Self> {
-        let index = SmkIndex::new(dim).map_err(PyValueError::new_err)?;
-        Ok(PyAssistantMemoryIndex {
-            inner: RwLock::new(index),
-        })
-    }
-
-    #[getter]
-    pub fn dim(&self, py: Python<'_>) -> usize {
-        py.detach(|| read_lock(&self.inner).dim())
-    }
-
-    /// Insert or replace (by `id`) a memory, returning its packed SMK.
-    ///
-    /// Raises ValueError on an invalid discriminant or an embedding whose
-    /// dimension does not match the index.
-    #[allow(clippy::too_many_arguments)]
-    pub fn add(
-        &self,
-        py: Python<'_>,
-        id: u64,
-        topic: u8,
-        kind: u8,
-        tool_mask: u16,
-        difficulty: u8,
-        generality: u8,
-        importance: u8,
-        embedding: Vec<f32>,
-    ) -> PyResult<u64> {
-        let smk = build_key(topic, kind, tool_mask, difficulty, generality, importance)?;
-        let entry = SmkEntry { id, embedding, smk };
-        py.detach(|| write_lock(&self.inner).upsert(entry))
-            .map(|_| smk.raw())
-            .map_err(PyValueError::new_err)
-    }
-
-    /// Remove a memory by id. Returns False when the id is unknown.
-    pub fn remove(&self, py: Python<'_>, id: u64) -> bool {
-        py.detach(|| write_lock(&self.inner).remove(id))
-    }
-
-    /// Query with a vector + SMK filter. Returns (id, score, smk_raw) triples.
-    ///
-    /// Raises ValueError on a query dimension mismatch.
-    pub fn query_top_k_filtered(
-        &self,
-        py: Python<'_>,
-        query: Vec<f32>,
-        k: usize,
-        smk_query: &PySmkQuery,
-    ) -> PyResult<Vec<(u64, f32, u64)>> {
-        let filter = smk_query.inner.clone();
-        py.detach(|| read_lock(&self.inner).query_top_k_filtered(&query, k, &filter))
-            .map(|hits| {
-                hits.into_iter()
-                    .map(|(id, score, smk)| (id, score, smk.raw()))
-                    .collect()
-            })
-            .map_err(PyValueError::new_err)
-    }
-
-    pub fn __len__(&self, py: Python<'_>) -> usize {
-        py.detach(|| read_lock(&self.inner).len())
-    }
-}
-
 #[pymodule]
 fn _native(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // conversation/user memory
     m.add_class::<PyMemoryEngine>()?;
     m.add_class::<PyMemoryCandidate>()?;
 
-    // assistant "brain" index
-    m.add_class::<PyAssistantMemoryIndex>()?;
-    m.add_class::<PySmkQuery>()?;
-    m.add_function(wrap_pyfunction!(pack_smk, m)?)?;
+    m.add_class::<PyVectorIndex>()?;
 
     Ok(())
 }
@@ -733,7 +550,13 @@ mod tests {
     const DAY: i64 = 86_400;
     const NOW: i64 = 1_700_000_000;
 
-    fn trace(uid: &str, user: &str, summary: &str, importance: f32, created_at: i64) -> IndexedTrace {
+    fn trace(
+        uid: &str,
+        user: &str,
+        summary: &str,
+        importance: f32,
+        created_at: i64,
+    ) -> IndexedTrace {
         IndexedTrace {
             trace_uid: uid.into(),
             user_id: user.into(),
@@ -761,9 +584,12 @@ mod tests {
     #[test]
     fn remove_frees_storage_and_keeps_moved_entry_searchable() {
         let mut e = MemoryEngine::default();
-        e.ingest_trace(trace("a", "u", "alpha", 0.5, NOW), vec![1.0, 0.0]).unwrap();
-        e.ingest_trace(trace("b", "u", "beta", 0.5, NOW), vec![0.0, 1.0]).unwrap();
-        e.ingest_trace(trace("c", "u", "gamma", 0.5, NOW), vec![1.0, 1.0]).unwrap();
+        e.ingest_trace(trace("a", "u", "alpha", 0.5, NOW), vec![1.0, 0.0])
+            .unwrap();
+        e.ingest_trace(trace("b", "u", "beta", 0.5, NOW), vec![0.0, 1.0])
+            .unwrap();
+        e.ingest_trace(trace("c", "u", "gamma", 0.5, NOW), vec![1.0, 1.0])
+            .unwrap();
 
         assert!(e.remove_trace("a"));
         assert!(!e.remove_trace("a"));
@@ -771,7 +597,9 @@ mod tests {
         assert!(!e.keyword_index.contains_key("alpha"), "no stale postings");
 
         // "c" moved into slot 0: its keyword must point at the new slot.
-        let hits = e.search_candidates(query("u", "gamma", 1), &[1.0, 1.0], NOW).unwrap();
+        let hits = e
+            .search_candidates(query("u", "gamma", 1), &[1.0, 1.0], NOW)
+            .unwrap();
         assert_eq!(uids(&hits), vec!["c"]);
         assert!(e.mark_accessed("c"));
         assert!(e.remove_trace("c"));
@@ -782,17 +610,23 @@ mod tests {
     #[test]
     fn removing_the_last_user_trace_drops_the_user_posting() {
         let mut e = MemoryEngine::default();
-        e.ingest_trace(trace("a", "u", "x", 0.5, NOW), vec![1.0]).unwrap();
+        e.ingest_trace(trace("a", "u", "x", 0.5, NOW), vec![1.0])
+            .unwrap();
         assert!(e.remove_trace("a"));
         assert!(e.user_index.is_empty());
-        assert!(e.search_candidates(query("u", "x", 5), &[1.0], NOW).unwrap().is_empty());
+        assert!(e
+            .search_candidates(query("u", "x", 5), &[1.0], NOW)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
     fn update_drops_old_keywords() {
         let mut e = MemoryEngine::default();
-        e.ingest_trace(trace("a", "u", "likes tea", 0.5, NOW), vec![1.0]).unwrap();
-        e.ingest_trace(trace("a", "u", "likes coffee", 0.5, NOW), vec![1.0]).unwrap();
+        e.ingest_trace(trace("a", "u", "likes tea", 0.5, NOW), vec![1.0])
+            .unwrap();
+        e.ingest_trace(trace("a", "u", "likes coffee", 0.5, NOW), vec![1.0])
+            .unwrap();
         assert_eq!(e.len(), 1);
         assert!(!e.keyword_index.contains_key("tea"));
         assert!(e.keyword_index.contains_key("coffee"));
@@ -802,23 +636,42 @@ mod tests {
     fn other_users_keyword_matches_do_not_suppress_fallback() {
         let mut e = MemoryEngine::default();
         for i in 0..5 {
-            e.ingest_trace(trace(&format!("b{i}"), "bob", "python tip", 0.5, NOW), vec![1.0]).unwrap();
+            e.ingest_trace(
+                trace(&format!("b{i}"), "bob", "python tip", 0.5, NOW),
+                vec![1.0],
+            )
+            .unwrap();
         }
-        e.ingest_trace(trace("a1", "alice", "snake case", 0.9, NOW), vec![1.0]).unwrap();
-        e.ingest_trace(trace("a2", "alice", "short meetings", 0.8, NOW), vec![1.0]).unwrap();
-        let hits = e.search_candidates(query("alice", "python", 3), &[1.0], NOW).unwrap();
+        e.ingest_trace(trace("a1", "alice", "snake case", 0.9, NOW), vec![1.0])
+            .unwrap();
+        e.ingest_trace(trace("a2", "alice", "short meetings", 0.8, NOW), vec![1.0])
+            .unwrap();
+        let hits = e
+            .search_candidates(query("alice", "python", 3), &[1.0], NOW)
+            .unwrap();
         assert_eq!(uids(&hits), vec!["a1", "a2"]);
     }
 
     #[test]
     fn invalid_inputs_are_errors() {
         let mut e = MemoryEngine::default();
-        assert!(e.ingest_trace(trace("a", "u", "s", 0.5, NOW), vec![]).is_err());
-        assert!(e.ingest_trace(trace("a", "u", "s", 7.3, NOW), vec![1.0]).is_err());
-        assert!(e.ingest_trace(trace("a", "u", "s", f32::NAN, NOW), vec![1.0]).is_err());
-        e.ingest_trace(trace("a", "u", "s", 0.5, NOW), vec![1.0, 0.0]).unwrap();
-        assert!(e.ingest_trace(trace("b", "u", "s", 0.5, NOW), vec![1.0]).is_err());
-        assert!(e.search_candidates(query("u", "s", 5), &[1.0], NOW).is_err());
+        assert!(e
+            .ingest_trace(trace("a", "u", "s", 0.5, NOW), vec![])
+            .is_err());
+        assert!(e
+            .ingest_trace(trace("a", "u", "s", 7.3, NOW), vec![1.0])
+            .is_err());
+        assert!(e
+            .ingest_trace(trace("a", "u", "s", f32::NAN, NOW), vec![1.0])
+            .is_err());
+        e.ingest_trace(trace("a", "u", "s", 0.5, NOW), vec![1.0, 0.0])
+            .unwrap();
+        assert!(e
+            .ingest_trace(trace("b", "u", "s", 0.5, NOW), vec![1.0])
+            .is_err());
+        assert!(e
+            .search_candidates(query("u", "s", 5), &[1.0], NOW)
+            .is_err());
         assert!(e.search_candidates(query("u", "s", 5), &[], NOW).is_err());
     }
 
@@ -836,7 +689,8 @@ mod tests {
         let mut old = trace("old", "u", "s", 0.5, NOW - 365 * DAY);
         old.access_count = 50;
         e.ingest_trace(old, vec![1.0]).unwrap();
-        e.ingest_trace(trace("new", "u", "s", 0.5, NOW), vec![1.0]).unwrap();
+        e.ingest_trace(trace("new", "u", "s", 0.5, NOW), vec![1.0])
+            .unwrap();
         let hits = e.search_candidates(query("u", "", 5), &[1.0], NOW).unwrap();
         assert!((hits[0].score - hits[1].score).abs() < 1e-6);
         // equal scores: newer first
@@ -847,29 +701,43 @@ mod tests {
     fn recency_weight_prefers_newer_traces_with_half_life_decay() {
         let w = ScoreWeights::new(0.0, 0.0, 1.0, 0.0, 10.0).unwrap();
         let mut e = MemoryEngine::with_weights(w);
-        e.ingest_trace(trace("old", "u", "s", 0.5, NOW - 10 * DAY), vec![1.0]).unwrap();
-        e.ingest_trace(trace("new", "u", "s", 0.5, NOW), vec![1.0]).unwrap();
-        e.ingest_trace(trace("future", "u", "s", 0.5, NOW + DAY), vec![1.0]).unwrap();
+        e.ingest_trace(trace("old", "u", "s", 0.5, NOW - 10 * DAY), vec![1.0])
+            .unwrap();
+        e.ingest_trace(trace("new", "u", "s", 0.5, NOW), vec![1.0])
+            .unwrap();
+        e.ingest_trace(trace("future", "u", "s", 0.5, NOW + DAY), vec![1.0])
+            .unwrap();
         let hits = e.search_candidates(query("u", "", 5), &[1.0], NOW).unwrap();
         let score = |uid: &str| hits.iter().find(|c| c.trace_uid == uid).unwrap().score;
         assert!((score("new") - 1.0).abs() < 1e-6);
-        assert!((score("old") - 0.5).abs() < 1e-6, "one half-life halves the term");
-        assert!((score("future") - 1.0).abs() < 1e-6, "clock skew clamps to age 0");
+        assert!(
+            (score("old") - 0.5).abs() < 1e-6,
+            "one half-life halves the term"
+        );
+        assert!(
+            (score("future") - 1.0).abs() < 1e-6,
+            "clock skew clamps to age 0"
+        );
     }
 
     #[test]
     fn access_weight_rewards_frequently_recalled_traces() {
         let w = ScoreWeights::new(0.5, 0.0, 0.0, 0.5, 30.0).unwrap();
         let mut e = MemoryEngine::with_weights(w);
-        e.ingest_trace(trace("cold", "u", "s", 0.5, NOW), vec![1.0]).unwrap();
-        e.ingest_trace(trace("hot", "u", "s", 0.5, NOW), vec![1.0]).unwrap();
+        e.ingest_trace(trace("cold", "u", "s", 0.5, NOW), vec![1.0])
+            .unwrap();
+        e.ingest_trace(trace("hot", "u", "s", 0.5, NOW), vec![1.0])
+            .unwrap();
         for _ in 0..10 {
             e.mark_accessed("hot");
         }
         let hits = e.search_candidates(query("u", "", 5), &[1.0], NOW).unwrap();
         assert_eq!(uids(&hits), vec!["hot", "cold"]);
         assert_eq!(hits[0].access_count, 10);
-        assert!(hits[0].score < 1.0, "access term is bounded below its weight");
+        assert!(
+            hits[0].score < 1.0,
+            "access term is bounded below its weight"
+        );
     }
 
     #[test]

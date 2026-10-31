@@ -71,6 +71,6 @@ jobs:
       - name: Examples
         working-directory: ${{ runner.temp }}
         run: |
-          for example in basic_usage per_user_assistant smk_assistant; do
+          for example in basic_usage per_user_assistant typed_memory; do
             uv run --project "$GITHUB_WORKSPACE" python "$GITHUB_WORKSPACE/examples/$example.py"
           done

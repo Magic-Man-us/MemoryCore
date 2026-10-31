@@ -9,15 +9,15 @@ from memory_core.storage import LongTermStore, ShortTermStore, SqlWorkingMemory
 
 
 def _trace(uid: str, user: str = "alice", **kw) -> MemoryTrace:
-    defaults = dict(
-        trace_uid=uid,
-        user_id=user,
-        content="full content",
-        summary=f"summary {uid}",
-        importance=0.7,
-        created_at=datetime.now(UTC),
-        tags={"t1", "t2"},
-    )
+    defaults = {
+        "trace_uid": uid,
+        "user_id": user,
+        "content": "full content",
+        "summary": f"summary {uid}",
+        "importance": 0.7,
+        "created_at": datetime.now(UTC),
+        "tags": {"t1", "t2"},
+    }
     defaults.update(kw)
     return MemoryTrace(**defaults)
 
@@ -60,7 +60,7 @@ class TestLongTermStore:
     def test_no_embedding_roundtrip(self, db):
         store = LongTermStore(db)
         store.upsert_trace(_trace("u2"), embedding=None)
-        [(trace, embedding)] = store.fetch_traces_for_user("alice")
+        [(_stored_trace, embedding)] = store.fetch_traces_for_user("alice")
         assert embedding is None
 
     def test_extra_roundtrip(self, db):
@@ -189,7 +189,9 @@ class TestLongTermAccess:
         store.upsert_trace(_trace("u1"), embedding=[0.1])
         store.upsert_trace(_trace("u2"), embedding=[0.1])
         assert store.increment_access(["u1", "u1", "missing"]) == 1
-        counts = {t.trace_uid: t.access_count for t, _ in store.fetch_traces_for_user("alice")}
+        counts = {
+            t.trace_uid: t.access_count for t, _ in store.fetch_traces_for_user("alice")
+        }
         assert counts == {"u1": 1, "u2": 0}
         assert store.increment_access([]) == 0
 
@@ -199,7 +201,9 @@ class TestWorkingMemoryTraceLinks:
         wm = SqlWorkingMemory(db, ttl_seconds=60)
         wm.add_event("alice", {"kind": "ltm_trace", "trace_uid": "t-1"})
         wm.add_event("alice", {"kind": "turn"})
-        wm.add_event("alice", {"kind": "odd", "trace_uid": 42})  # non-str uid: not linked
+        wm.add_event(
+            "alice", {"kind": "odd", "trace_uid": 42}
+        )  # non-str uid: not linked
         assert wm.delete_for_trace("t-1") == 1
         assert [e["kind"] for e in wm.get_recent("alice")] == ["turn", "odd"]
 
@@ -225,25 +229,6 @@ class TestWorkingMemoryTraceLinks:
         wm = SqlWorkingMemory(upgraded, ttl_seconds=60)
         wm.add_event("alice", {"trace_uid": "t-1"})
         assert wm.delete_for_trace("t-1") == 1
-
-
-class TestAssistantStore:
-    def test_roundtrip_upsert_delete(self, db):
-        from memory_core.storage import AssistantStore
-        from tests.conftest import make_assistant_trace
-
-        store = AssistantStore(db)
-        trace = make_assistant_trace(trace_uid="a-1", extra={"source": "review"})
-        trace.smk_raw = 123
-        store.upsert_trace(trace, embedding=[0.5, 0.5])
-        store.upsert_trace(trace, embedding=[0.25, 0.75])
-
-        [(loaded, embedding)] = store.fetch_all()
-        assert loaded == trace
-        assert embedding == [0.25, 0.75]
-        assert store.delete_trace("a-1") is True
-        assert store.delete_trace("a-1") is False
-        assert store.fetch_all() == []
 
 
 def test_wm_migration_backfills_trace_links_for_existing_events(tmp_path):
@@ -276,8 +261,11 @@ def test_wm_migration_backfills_trace_links_for_existing_events(tmp_path):
                     "INSERT INTO wm_events (user_id, created_at, expires_at, payload) "
                     "VALUES ('alice', :now, :exp, :payload)"
                 ),
-                {"now": datetime.now(UTC).isoformat(), "exp": future,
-                 "payload": json.dumps(payload)},
+                {
+                    "now": datetime.now(UTC).isoformat(),
+                    "exp": future,
+                    "payload": json.dumps(payload),
+                },
             )
         connection.execute(
             text(

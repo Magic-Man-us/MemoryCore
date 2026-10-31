@@ -121,7 +121,9 @@ class SqlWorkingMemory:
         """Drop all of a user's working-memory events."""
         with self._db.session_scope() as session:
             session.execute(
-                delete(WorkingMemoryEventORM).where(WorkingMemoryEventORM.user_id == user_id)
+                delete(WorkingMemoryEventORM).where(
+                    WorkingMemoryEventORM.user_id == user_id
+                )
             )
             session.commit()
 

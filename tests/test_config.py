@@ -39,7 +39,9 @@ def test_stm_toggle(tmp_path):
 
 def test_unknown_override_keys_raise(tmp_path):
     with pytest.raises(ValueError, match="unknown override keys"):
-        build_memory_system(sqlite_path=tmp_path / "t.db", overrides={"enable_sm": True})
+        build_memory_system(
+            sqlite_path=tmp_path / "t.db", overrides={"enable_sm": True}
+        )
     with pytest.raises(ValueError, match="unknown db override keys"):
         build_memory_system(overrides={"db": {"uri": "sqlite://"}})
 
@@ -47,13 +49,9 @@ def test_unknown_override_keys_raise(tmp_path):
 def test_overrides_are_validated(tmp_path):
     """Overrides used to bypass validation entirely (a negative TTL went through)."""
     with pytest.raises(ValidationError):
-        build_memory_system(sqlite_path=tmp_path / "t.db", overrides={"wm_ttl_seconds": -5})
-
-
-def test_assistant_index_requires_dim(tmp_path):
-    with pytest.raises(ValueError, match="assistant_index_dim"):
-        build_memory_system(sqlite_path=tmp_path / "t.db",
-                            overrides={"enable_assistant_index": True})
+        build_memory_system(
+            sqlite_path=tmp_path / "t.db", overrides={"wm_ttl_seconds": -5}
+        )
 
 
 def test_nested_env_configures_scoring(monkeypatch):
@@ -67,21 +65,10 @@ def test_settings_instance_plus_overrides(tmp_path):
     from memory_core import MemoryCoreSettings, resolve_settings
 
     base = MemoryCoreSettings(enable_stm=True)
-    resolved = resolve_settings(base, overrides={"scoring": {"recency": 0.1}},
-                                sqlite_path=tmp_path / "t.db")
+    resolved = resolve_settings(
+        base, overrides={"scoring": {"recency": 0.1}}, sqlite_path=tmp_path / "t.db"
+    )
     assert resolved.enable_stm is True
     assert resolved.scoring.recency == 0.1
     assert resolved.scoring.semantic == 0.7
     assert resolved.db.sqlite_path == str(tmp_path / "t.db")
-
-
-def test_env_enabled_assistant_index_takes_dim_from_overrides(tmp_path, monkeypatch):
-    """PR #17 review: the env-only base must not fail before overrides apply."""
-    monkeypatch.setenv("MEMORY_CORE_ENABLE_ASSISTANT_INDEX", "true")
-    monkeypatch.delenv("MEMORY_CORE_ASSISTANT_INDEX_DIM", raising=False)
-    system = build_memory_system(sqlite_path=tmp_path / "t.db",
-                                 overrides={"assistant_index_dim": 8})
-    assert system.assistant_index is not None and system.assistant_index.dim == 8
-    disabled = build_memory_system(sqlite_path=tmp_path / "t.db",
-                                   overrides={"enable_assistant_index": False})
-    assert disabled.assistant_index is None
