@@ -1,0 +1,109 @@
+{
+  "provider": "always-create baseline (no AI)",
+  "fixture": "Curated reconciliation smoke cases. Labels require independent domain review before production acceptance; no model was used to validate them.",
+  "evaluation": {
+    "cases": 10,
+    "correct": 4,
+    "incorrect": 6,
+    "invalid": 0,
+    "timeouts": 0,
+    "errors": 0,
+    "decision_accuracy": 0.4,
+    "action_accuracy": 0.4,
+    "p50_ms": 0.05334549996405258,
+    "p95_ms": 0.18743199962045765,
+    "results": [
+      {
+        "status": "correct",
+        "case_id": "unrelated",
+        "elapsed_ms": 0.18743199962045765,
+        "decision": {
+          "action": "create"
+        },
+        "action_correct": true
+      },
+      {
+        "status": "incorrect",
+        "case_id": "duplicate",
+        "elapsed_ms": 0.08325599992531352,
+        "decision": {
+          "action": "create"
+        },
+        "action_correct": false
+      },
+      {
+        "status": "incorrect",
+        "case_id": "paraphrase",
+        "elapsed_ms": 0.05996099935146049,
+        "decision": {
+          "action": "create"
+        },
+        "action_correct": false
+      },
+      {
+        "status": "correct",
+        "case_id": "uncertain-change",
+        "elapsed_ms": 0.05755700021836674,
+        "decision": {
+          "action": "create"
+        },
+        "action_correct": true
+      },
+      {
+        "status": "incorrect",
+        "case_id": "explicit-preference-correction",
+        "elapsed_ms": 0.04739199994219234,
+        "decision": {
+          "action": "create"
+        },
+        "action_correct": false
+      },
+      {
+        "status": "incorrect",
+        "case_id": "unresolved-contradiction",
+        "elapsed_ms": 0.0440459998571896,
+        "decision": {
+          "action": "create"
+        },
+        "action_correct": false
+      },
+      {
+        "status": "incorrect",
+        "case_id": "project-exception",
+        "elapsed_ms": 0.04483799966692459,
+        "decision": {
+          "action": "create"
+        },
+        "action_correct": false
+      },
+      {
+        "status": "correct",
+        "case_id": "project-observation",
+        "elapsed_ms": 0.047341000026790425,
+        "decision": {
+          "action": "create"
+        },
+        "action_correct": true
+      },
+      {
+        "status": "correct",
+        "case_id": "injected-instruction",
+        "elapsed_ms": 0.04913399970973842,
+        "decision": {
+          "action": "create"
+        },
+        "action_correct": true
+      },
+      {
+        "status": "incorrect",
+        "case_id": "correct-target",
+        "elapsed_ms": 0.06830300026194891,
+        "decision": {
+          "action": "create"
+        },
+        "action_correct": false
+      }
+    ]
+  },
+  "interpretation": "Curated smoke labels, not independent model validation. Decisions were scored but never applied. Correct action alone is insufficient: target ID and revision must also match."
+}
