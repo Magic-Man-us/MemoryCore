@@ -65,13 +65,17 @@ def catalog(service, request, owner):
             return FieldResponse(definition=field)
         if isinstance(request, ListValuesRequest):
             field = registry.resolve(request.field)
-            # Discover only active values belonging to this owner.
+            # Apply scope before pagination so hidden values cannot affect results.
+            eligible = cache.by_status[Status.ACTIVE]
+            if request.scope is not None:
+                eligible = eligible & cache.eligible(
+                    getattr(request.scope, "project_id", None)
+                )
             values = sorted(
                 (
                     key[1]
                     for key, ids in cache.metadata.postings.get(field.name, {}).items()
-                    if ids & cache.by_status[Status.ACTIVE]
-                    and str(key[1]).startswith(request.prefix)
+                    if ids & eligible and str(key[1]).startswith(request.prefix)
                 ),
                 key=str,
             )

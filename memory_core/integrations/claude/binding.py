@@ -9,7 +9,12 @@ from copy import deepcopy
 
 from memory_core.mcpapp import create_server
 from memory_core.memory.errors import ContextRequiredError, SchemaError
-from memory_core.memory.models import RecallRequest
+from memory_core.memory.models import (
+    ListValuesRequest,
+    ProjectScope,
+    RecallRequest,
+    UserScope,
+)
 from memory_core.runtime.models import (
     REQUEST_ADAPTER,
     BeginTaskRequest,
@@ -146,11 +151,27 @@ class TaskBinding(MemoryTools):
             schema["properties"]["limit"]["default"] = self.policy.max_recall_hits
         return schema
 
+    @property
+    def discovery_scope(self):
+        return (
+            ProjectScope(project_id=self.context.project_id)
+            if self.context.project_id
+            else UserScope()
+        )
+
     async def invoke(self, arguments):
         if self.lease is not None:
             await asyncio.to_thread(self.lease.validate)
         if arguments.get("operation") == "recall" and "limit" not in arguments:
             arguments = {**arguments, "limit": self.policy.max_recall_hits}
+        if (
+            arguments.get("operation") == "list_metadata_values"
+            and "scope" not in arguments
+        ):
+            arguments = {
+                **arguments,
+                "scope": self.discovery_scope.model_dump(mode="json"),
+            }
         request = REQUEST_ADAPTER.validate_python(arguments)
         if request.operation not in OPERATIONS:
             raise SchemaError("operation is unavailable to the task agent")
@@ -166,6 +187,11 @@ class TaskBinding(MemoryTools):
             and request.limit > self.policy.max_recall_hits
         ):
             raise SchemaError(f"task recall limit is {self.policy.max_recall_hits}")
+        if (
+            isinstance(request, ListValuesRequest)
+            and request.scope != self.discovery_scope
+        ):
+            raise SchemaError("metadata discovery scope is bound by the host")
         if isinstance(request, RecordFindingRequest):
             self.validate_findings([request.finding])
         if isinstance(request, PrepareTaskRequest):
@@ -200,6 +226,9 @@ class TaskBinding(MemoryTools):
             for name in ("prepare_task", "require_knowledge", "record_finding")
         }
         bindings["recall"] = {"project_id": self.context.project_id}
+        bindings["list_metadata_values"] = {
+            "scope": self.discovery_scope.model_dump(mode="json")
+        }
         server = create_server(
             self.memory,
             owner_id=self.owner_id,
