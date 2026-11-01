@@ -15,6 +15,14 @@ from .metadata import DEFAULT_FIELDS
 from .models import FieldDefinition
 
 DDL = (
+    "CREATE TABLE IF NOT EXISTS memory_dream_archives (owner TEXT NOT NULL,id TEXT NOT NULL,payload BLOB NOT NULL,PRIMARY KEY(owner,id))",
+    """CREATE TABLE IF NOT EXISTS memory_archives (
+        owner TEXT NOT NULL,id TEXT NOT NULL,generation INTEGER NOT NULL,
+        payload BLOB NOT NULL,embedding BLOB,archived_at REAL NOT NULL,PRIMARY KEY(owner,id))""",
+    "CREATE INDEX IF NOT EXISTS memory_archive_generation ON memory_archives(owner,generation)",
+    """CREATE TABLE IF NOT EXISTS memory_vector_snapshots (
+        owner TEXT PRIMARY KEY, identity TEXT NOT NULL, generation INTEGER NOT NULL,
+        manifest TEXT NOT NULL, graph BLOB NOT NULL)""",
     """CREATE TABLE IF NOT EXISTS memory_owners (
        owner TEXT PRIMARY KEY, generation INTEGER NOT NULL DEFAULT 0,
        writes INTEGER NOT NULL DEFAULT 0, dream_cursor INTEGER NOT NULL DEFAULT 0, dream_cursor_id TEXT NOT NULL DEFAULT '',
@@ -23,6 +31,7 @@ DDL = (
        owner TEXT NOT NULL, id TEXT NOT NULL, generation INTEGER NOT NULL,
        payload TEXT NOT NULL, embedding BLOB, PRIMARY KEY(owner,id))""",
     "CREATE INDEX IF NOT EXISTS memories_generation ON memories_v1(owner,generation)",
+    "CREATE INDEX IF NOT EXISTS memories_scan_cursor ON memories_v1(owner,generation,id)",
     """CREATE TABLE IF NOT EXISTS memory_fields (
        owner TEXT NOT NULL, name TEXT NOT NULL, definition TEXT NOT NULL,
        PRIMARY KEY(owner,name))""",
@@ -112,6 +121,18 @@ class Store:
             {"o": owner, "g": generation, "a": action, "d": json.dumps(detail)},
         )
         return generation
+
+    @staticmethod
+    def contains(session, owner, memory_id):
+        return (
+            session.execute(
+                text(
+                    "SELECT 1 FROM memories_v1 WHERE owner=:o AND id=:id UNION ALL SELECT 1 FROM memory_archives WHERE owner=:o AND id=:id LIMIT 1"
+                ),
+                {"o": owner, "id": memory_id},
+            ).first()
+            is not None
+        )
 
     @staticmethod
     def put(session, owner, memory, embedding, generation):

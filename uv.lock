@@ -762,6 +762,15 @@ wheels = [
 ]
 
 [[package]]
+name = "hnswlib"
+version = "0.8.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/cf/7a/1a9b1405f2eb59515f06c3074750b03e0e96edf7fee0f6dd6df81d9c21d7/hnswlib-0.8.0.tar.gz", hash = "sha256:cb6d037eedebb34a7134e7dc78966441dfd04c9cf5ee93911be911ced951c44c", size = 36206, upload-time = "2023-12-03T04:16:17.55Z" }
+
+[[package]]
 name = "httpcore"
 version = "1.0.9"
 source = { registry = "https://pypi.org/simple" }
@@ -1257,6 +1266,10 @@ dependencies = [
 ai = [
     { name = "pydantic-ai" },
 ]
+ann = [
+    { name = "hnswlib" },
+    { name = "numpy" },
+]
 claude = [
     { name = "claude-agent-sdk" },
     { name = "mcp" },
@@ -1279,9 +1292,11 @@ postgres = [
 [package.metadata]
 requires-dist = [
     { name = "claude-agent-sdk", marker = "extra == 'claude'", specifier = ">=0.2.176,<0.3" },
+    { name = "hnswlib", marker = "extra == 'ann'", specifier = ">=0.8,<0.9" },
     { name = "maturin", marker = "extra == 'dev'", specifier = ">=1.10.1" },
     { name = "mcp", marker = "extra == 'claude'", specifier = ">=2.3,<3" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=2.3,<3" },
+    { name = "numpy", marker = "extra == 'ann'", specifier = ">=2,<3" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.2.0" },
     { name = "pydantic", specifier = ">=2.12.4" },
     { name = "pydantic-ai", marker = "extra == 'ai'", specifier = ">=1.102.0" },
@@ -1291,7 +1306,7 @@ requires-dist = [
     { name = "sentence-transformers", marker = "extra == 'local'", specifier = ">=5,<6" },
     { name = "sqlalchemy", specifier = ">=2.0.44" },
 ]
-provides-extras = ["dev", "local", "postgres", "ai", "mcp", "claude"]
+provides-extras = ["ann", "dev", "local", "postgres", "ai", "mcp", "claude"]
 
 [[package]]
 name = "mpmath"

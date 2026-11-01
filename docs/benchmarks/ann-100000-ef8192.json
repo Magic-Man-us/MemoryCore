@@ -1,0 +1,32 @@
+{
+  "count": 100000,
+  "dimensions": 384,
+  "queries": 30,
+  "policy": {
+    "backend": "hnsw",
+    "exact_threshold": 1000,
+    "ef_search": 8192,
+    "ef_construction": 200,
+    "connections": 24,
+    "max_candidates": 4096,
+    "payload_cache_size": 256,
+    "checkpoint_after_updates": 1000
+  },
+  "build_both_seconds": 195.78157592499974,
+  "mean_top10_overlap": 1.0,
+  "minimum_query_overlap": 1.0,
+  "acceptance_target": 0.98,
+  "accepted": true,
+  "exact": {
+    "p50_ms": 65.51877199990486,
+    "p95_ms": 75.58636999965529
+  },
+  "hnsw": {
+    "p50_ms": 51.56626649977625,
+    "p95_ms": 57.61232400072913
+  },
+  "graph_bytes": 174839396,
+  "manifest_bytes": 2466806,
+  "process_peak_rss_mib_linux": 753.9453125,
+  "note": "Random normalized vectors, not semantic quality. RSS includes both indexes and fixture. Independent queries are not indexed."
+}

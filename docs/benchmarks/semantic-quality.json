@@ -1,0 +1,85 @@
+{
+  "model": {
+    "model_id": "sentence-transformers/all-MiniLM-L6-v2",
+    "revision": "1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
+    "dimensions": 384
+  },
+  "fixture": "Small curated smoke corpus; labels are not an independent human evaluation or a production quality guarantee.",
+  "results": {
+    "exact": {
+      "before": {
+        "cases": 20,
+        "k": 3,
+        "mean_recall_at_k": 0.95,
+        "mean_precision_at_k": 0.31666666666666665,
+        "mean_reciprocal_rank": 0.9,
+        "p50_ms": 14.574261499774366,
+        "p95_ms": 18.887245999849256
+      },
+      "after_restart_and_dream": {
+        "cases": 20,
+        "k": 3,
+        "mean_recall_at_k": 0.95,
+        "mean_precision_at_k": 0.31666666666666665,
+        "mean_reciprocal_rank": 0.9,
+        "p50_ms": 13.99656699982188,
+        "p95_ms": 16.361001999939617
+      },
+      "unanswerable_candidates": [
+        {
+          "query": "What is my bank account balance?",
+          "candidate_count": 3,
+          "top_score": 0.10160125941038131
+        },
+        {
+          "query": "What did I eat for breakfast?",
+          "candidate_count": 3,
+          "top_score": 0.10195187851786613
+        },
+        {
+          "query": "What is the password for my laptop?",
+          "candidate_count": 3,
+          "top_score": 0.14904125769223486
+        }
+      ]
+    },
+    "hnsw": {
+      "before": {
+        "cases": 20,
+        "k": 3,
+        "mean_recall_at_k": 0.95,
+        "mean_precision_at_k": 0.31666666666666665,
+        "mean_reciprocal_rank": 0.9,
+        "p50_ms": 13.123885000140945,
+        "p95_ms": 17.43290700005673
+      },
+      "after_restart_and_dream": {
+        "cases": 20,
+        "k": 3,
+        "mean_recall_at_k": 0.95,
+        "mean_precision_at_k": 0.31666666666666665,
+        "mean_reciprocal_rank": 0.9,
+        "p50_ms": 14.297825500079853,
+        "p95_ms": 25.688245999845094
+      },
+      "unanswerable_candidates": [
+        {
+          "query": "What is my bank account balance?",
+          "candidate_count": 3,
+          "top_score": 0.10160126984119415
+        },
+        {
+          "query": "What did I eat for breakfast?",
+          "candidate_count": 3,
+          "top_score": 0.10195187330245971
+        },
+        {
+          "query": "What is the password for my laptop?",
+          "candidate_count": 3,
+          "top_score": 0.14904126290764128
+        }
+      ]
+    }
+  },
+  "interpretation": "Candidates are not answers. Unanswerable queries require knowledge evaluation; similarity alone does not establish support. This run does not evaluate an LLM reconciler."
+}

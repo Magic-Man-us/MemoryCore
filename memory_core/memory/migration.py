@@ -98,7 +98,7 @@ async def import_legacy(
 
     def write():
         with service._lock, service.store.transaction(owner_id) as session:
-            cache, registry, _ = service._snapshot(session, owner_id)
+            _cache, registry, _ = service._snapshot(session, owner_id)
             session.execute(
                 text("""CREATE TABLE IF NOT EXISTS memory_legacy_archive (
                 owner TEXT NOT NULL, source TEXT NOT NULL, id TEXT NOT NULL,payload TEXT NOT NULL,
@@ -114,7 +114,7 @@ async def import_legacy(
                 ).first()
                 if exists:
                     continue
-                if memory.id in cache.memories:
+                if service.store.contains(session, owner_id, memory.id):
                     raise ConflictError("legacy import ID collision")
                 memory = service._normalize(memory, registry)
                 generation = service.store.bump(

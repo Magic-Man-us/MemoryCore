@@ -13,6 +13,7 @@ from .models import (
     UnresolvedKnowledge,
 )
 from .reasoning import StructuredReasoner
+from .retention import RetentionPolicy, RetentionResult
 from .tools import MemoryTools
 
 __all__ = [
@@ -24,6 +25,8 @@ __all__ = [
     "MemoryTools",
     "NeedsUserInput",
     "ResolvedKnowledge",
+    "RetentionPolicy",
+    "RetentionResult",
     "StructuredReasoner",
     "TaskOutcome",
     "TaskRunResult",

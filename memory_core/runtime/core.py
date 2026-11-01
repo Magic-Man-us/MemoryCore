@@ -47,10 +47,14 @@ class MemoryCore:
         service,
         *,
         maintenance=None,
+        retention=None,
         researcher=None,
         knowledge_evaluator=None,
         context_resolvers=(),
     ):
+        from .retention import RetentionPolicy
+
+        self.retention = RetentionPolicy.model_validate(retention or RetentionPolicy())
         self.service = service
         self.policy = MaintenancePolicy.model_validate(
             maintenance or MaintenancePolicy()
@@ -73,6 +77,23 @@ class MemoryCore:
 
     async def __aexit__(self, exc_type, exc, tb):
         await self.worker.stop()
+        await self.service.checkpoint_indexes(force=True)
+
+    async def maintain(self, *, owner_id):
+        from .retention import maintain
+
+        return await maintain(self, owner_id)
+
+    async def reclaim_storage(self, *, pages=256):
+        from .retention import reclaim
+
+        return await reclaim(self, pages=pages)
+
+    async def measurements(self, *, owner_id):
+        """Sample owner counts and whole-database disk usage without loading memories."""
+        from .metrics import measure
+
+        return await asyncio.to_thread(measure, self, owner_id)
 
     def task(self, *, owner_id, context, objective):
         from .task import TaskSession
@@ -398,6 +419,7 @@ class MemoryCore:
         reconciler=None,
         dream_planner=None,
         max_cached_owners=16,
+        index_policy=None,
         **kwargs,
     ):
         """Create a local runtime with optional reasoning/research providers."""
@@ -410,6 +432,7 @@ class MemoryCore:
             reconciler=reconciler,
             dream_planner=dream_planner,
             max_cached_owners=max_cached_owners,
+            index_policy=index_policy,
         ).service
         return cls(service, **kwargs)
 

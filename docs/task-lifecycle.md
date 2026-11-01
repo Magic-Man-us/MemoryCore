@@ -327,3 +327,6 @@ The transport uses the official MCP Python SDK 2.x low-level server API:
 The optional [Claude Agent SDK adapter](claude-agent-sdk.md) connects these task
 hooks automatically to SDK runs, with bounded admission, isolated clients,
 task-bound in-process tools, and explicit structured outcome capture.
+
+For maintenance continuation, retained history, local diagnostics, and growth
+benchmarks, see [Growing a local memory collection](local-memory-growth.md).

@@ -1,0 +1,224 @@
+{
+  "seed_count": 5000,
+  "dimensions": 384,
+  "seed_seconds": 0.1846531169994705,
+  "cold_recall_seconds": 0.34298931500052277,
+  "baseline_synthetic_quality": {
+    "cases": 8,
+    "k": 5,
+    "mean_recall_at_k": 1.0,
+    "mean_precision_at_k": 0.2,
+    "mean_reciprocal_rank": 1.0,
+    "p50_ms": 4.267112499292125,
+    "p95_ms": 5.366348001189181
+  },
+  "cycles": [
+    {
+      "write_latency": {
+        "samples": 32,
+        "p50_ms": 8.394482500989398,
+        "p95_ms": 12.648018000618322
+      },
+      "recall_during_maintenance": {
+        "samples": 13,
+        "p50_ms": 7.73282400041353,
+        "p95_ms": 12.49408100011351
+      },
+      "maintenance_seconds": 0.2480418169998302,
+      "maintenance_batches": 2,
+      "synthetic_quality": {
+        "cases": 8,
+        "k": 5,
+        "mean_recall_at_k": 1.0,
+        "mean_precision_at_k": 0.2,
+        "mean_reciprocal_rank": 1.0,
+        "p50_ms": 4.951711499415978,
+        "p95_ms": 6.358470000122907
+      },
+      "restart_and_evaluation_seconds": 0.2971820940001635
+    },
+    {
+      "write_latency": {
+        "samples": 32,
+        "p50_ms": 8.974900500106742,
+        "p95_ms": 11.432387000240851
+      },
+      "recall_during_maintenance": {
+        "samples": 12,
+        "p50_ms": 8.876920500370034,
+        "p95_ms": 11.83545100138872
+      },
+      "maintenance_seconds": 0.235566198000015,
+      "maintenance_batches": 2,
+      "synthetic_quality": {
+        "cases": 8,
+        "k": 5,
+        "mean_recall_at_k": 1.0,
+        "mean_precision_at_k": 0.2,
+        "mean_reciprocal_rank": 1.0,
+        "p50_ms": 5.1136600004610955,
+        "p95_ms": 6.039208999936818
+      },
+      "restart_and_evaluation_seconds": 0.2372023279986024
+    }
+  ],
+  "snapshots": [
+    {
+      "phase": "seeded",
+      "rss_mib": 60.4921875,
+      "owner_id": "benchmark",
+      "memories_by_status": {
+        "active": 5000
+      },
+      "jobs_by_status": {},
+      "oldest_ready_wait_seconds": null,
+      "cached_records": 0,
+      "records_after_dream_cursor": 0,
+      "database_file_bytes": 21123072,
+      "wal_file_bytes": 21391072,
+      "allocated_database_bytes": 21123072,
+      "reusable_database_bytes": 0,
+      "sampled_at": 1793473426.2900507
+    },
+    {
+      "phase": "hydrated",
+      "rss_mib": 94.58203125,
+      "owner_id": "benchmark",
+      "memories_by_status": {
+        "active": 5000
+      },
+      "jobs_by_status": {},
+      "oldest_ready_wait_seconds": null,
+      "cached_records": 5000,
+      "records_after_dream_cursor": 0,
+      "database_file_bytes": 21123072,
+      "wal_file_bytes": 21391072,
+      "allocated_database_bytes": 21123072,
+      "reusable_database_bytes": 0,
+      "sampled_at": 1793473426.6864605
+    },
+    {
+      "phase": "cycle-0-queued",
+      "rss_mib": 95.87109375,
+      "owner_id": "benchmark",
+      "memories_by_status": {
+        "active": 5024,
+        "superseded": 1
+      },
+      "jobs_by_status": {
+        "pending": 1
+      },
+      "oldest_ready_wait_seconds": 0.02418828010559082,
+      "cached_records": 5024,
+      "records_after_dream_cursor": 25,
+      "database_file_bytes": 21123072,
+      "wal_file_bytes": 21391072,
+      "allocated_database_bytes": 21229568,
+      "reusable_database_bytes": 0,
+      "sampled_at": 1793473426.991976
+    },
+    {
+      "phase": "cycle-0-drained",
+      "rss_mib": 99.6953125,
+      "owner_id": "benchmark",
+      "memories_by_status": {
+        "active": 5024,
+        "superseded": 1
+      },
+      "jobs_by_status": {
+        "done": 2
+      },
+      "oldest_ready_wait_seconds": null,
+      "cached_records": 5024,
+      "records_after_dream_cursor": 0,
+      "database_file_bytes": 21123072,
+      "wal_file_bytes": 21391072,
+      "allocated_database_bytes": 21344256,
+      "reusable_database_bytes": 28672,
+      "sampled_at": 1793473427.3088636
+    },
+    {
+      "phase": "cycle-0-restarted",
+      "rss_mib": 115.07421875,
+      "owner_id": "benchmark",
+      "memories_by_status": {
+        "active": 5024,
+        "superseded": 1
+      },
+      "jobs_by_status": {
+        "done": 2
+      },
+      "oldest_ready_wait_seconds": null,
+      "cached_records": 5024,
+      "records_after_dream_cursor": 0,
+      "database_file_bytes": 21344256,
+      "wal_file_bytes": 0,
+      "allocated_database_bytes": 21344256,
+      "reusable_database_bytes": 28672,
+      "sampled_at": 1793473427.6821175
+    },
+    {
+      "phase": "cycle-1-queued",
+      "rss_mib": 116.0703125,
+      "owner_id": "benchmark",
+      "memories_by_status": {
+        "active": 5048,
+        "superseded": 2
+      },
+      "jobs_by_status": {
+        "done": 2,
+        "pending": 1
+      },
+      "oldest_ready_wait_seconds": 0.023276567459106445,
+      "cached_records": 5048,
+      "records_after_dream_cursor": 25,
+      "database_file_bytes": 21344256,
+      "wal_file_bytes": 1190712,
+      "allocated_database_bytes": 21426176,
+      "reusable_database_bytes": 0,
+      "sampled_at": 1793473428.0093553
+    },
+    {
+      "phase": "cycle-1-drained",
+      "rss_mib": 118.9609375,
+      "owner_id": "benchmark",
+      "memories_by_status": {
+        "active": 5048,
+        "superseded": 2
+      },
+      "jobs_by_status": {
+        "done": 4
+      },
+      "oldest_ready_wait_seconds": null,
+      "cached_records": 5048,
+      "records_after_dream_cursor": 0,
+      "database_file_bytes": 21344256,
+      "wal_file_bytes": 1483232,
+      "allocated_database_bytes": 21540864,
+      "reusable_database_bytes": 28672,
+      "sampled_at": 1793473428.3150675
+    },
+    {
+      "phase": "cycle-1-restarted",
+      "rss_mib": 118.9609375,
+      "owner_id": "benchmark",
+      "memories_by_status": {
+        "active": 5048,
+        "superseded": 2
+      },
+      "jobs_by_status": {
+        "done": 4
+      },
+      "oldest_ready_wait_seconds": null,
+      "cached_records": 5048,
+      "records_after_dream_cursor": 0,
+      "database_file_bytes": 21540864,
+      "wal_file_bytes": 0,
+      "allocated_database_bytes": 21540864,
+      "reusable_database_bytes": 28672,
+      "sampled_at": 1793473428.6272125
+    }
+  ],
+  "peak_rss_mib_linux": 118.6875,
+  "limitations": "Synthetic labels/vectors; seed bypasses ingestion. Measures incremental public writes and real maintenance. Disk metrics cover the whole database. No real-model semantic quality claim."
+}

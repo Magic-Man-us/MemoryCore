@@ -3,17 +3,24 @@
 from __future__ import annotations
 
 import asyncio
+import time
+
+from sqlalchemy import text
 
 from memory_core.memory import dream
 from memory_core.memory.models import (
     AttachEvidence,
     Create,
+    DreamPlan,
+    DreamPlanRequest,
     ObservationMemory,
     ProjectScope,
     RememberRequest,
     UserScope,
 )
 from memory_core.memory.reconciliation import equivalent
+
+from .dreams import advance, scan_for
 
 
 class ReviewNeeded(Exception):
@@ -31,6 +38,8 @@ class Worker:
         self._runner = None
         self._stop = asyncio.Event()
         self.last_error = None
+        self._retention_after = 0
+        self._retention_owner = ""
 
     async def start(self):
         if self._runner is None:
@@ -62,6 +71,34 @@ class Worker:
     async def run_once(self, *, owner_id=None):
         claim = await asyncio.to_thread(self.queue.claim, owner_id)
         if claim is None:
+            await self.service.checkpoint_indexes()
+            if (
+                self.runtime.retention.enabled
+                and time.monotonic() >= self._retention_after
+            ):
+                self._retention_after = (
+                    time.monotonic() + self.runtime.retention.interval_seconds
+                )
+
+                def next_owner():
+                    with (
+                        self.service._lock,
+                        self.service.store.db.session_scope() as session,
+                    ):
+                        return session.execute(
+                            text(
+                                "SELECT owner FROM memory_owners WHERE owner>:o ORDER BY owner LIMIT 1"
+                            ),
+                            {"o": self._retention_owner},
+                        ).scalar()
+
+                owner = owner_id or await asyncio.to_thread(next_owner)
+                if owner is None:
+                    self._retention_owner = ""
+                    owner = await asyncio.to_thread(next_owner)
+                if owner:
+                    await self.runtime.maintain(owner_id=owner)
+                    self._retention_owner = owner
             return False
         try:
             async with asyncio.timeout(self.policy.job_timeout_seconds):
@@ -81,6 +118,10 @@ class Worker:
     def _finish(self, claim, status, result):
         with self.service._lock, self.queue.transaction(claim.owner) as session:
             self.queue.finish(session, claim, status, result)
+            if claim.kind == "dream" and status == "proposed":
+                advance(
+                    self.queue, session, claim, DreamPlan.model_validate(result["plan"])
+                )
 
     async def _capture(self, claim):
         def load_task():
@@ -163,13 +204,19 @@ class Worker:
         )
 
     async def _dream(self, claim):
+        scan = await asyncio.to_thread(scan_for, self.queue, claim)
         approval = (
             claim.result if claim.result and claim.result.get("approved") else None
         )
         if approval:
             plan_id = approval["plan_id"]
         else:
-            planned = await self.service.dream(owner_id=claim.owner)
+            planned = await dream.plan(
+                self.service,
+                claim.owner,
+                DreamPlanRequest(batch_size=self.policy.dream_batch_size),
+                scan=scan,
+            )
             plan = planned.plan
             exact_only = all(
                 isinstance(change.decision, AttachEvidence)
@@ -211,5 +258,8 @@ class Worker:
                     "recommendations": response.plan.proposal.recommendations,
                 },
             )
+            advance(self.queue, session, claim, response.plan)
 
-        await dream.apply(self.service, claim.owner, plan_id, on_commit=commit)
+        await dream.apply(
+            self.service, claim.owner, plan_id, on_commit=commit, _advance_cursor=False
+        )

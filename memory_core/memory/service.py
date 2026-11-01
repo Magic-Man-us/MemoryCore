@@ -45,7 +45,7 @@ from .models import (
     TaskContext,
 )
 from .preferences import resolve_preferences
-from .reconciliation import apply_reconciliation, equivalence_key, equivalent
+from .reconciliation import apply_reconciliation, equivalent
 from .store import Store
 
 
@@ -61,11 +61,15 @@ class MemoryService:
         dream_after_writes: int = 100,
         retrieval_policy: RetrievalPolicy | None = None,
         max_cached_owners: int = 16,
+        index_policy=None,
     ):
         if dream_after_writes < 1:
             raise ValueError("dream_after_writes must be positive")
         if type(max_cached_owners) is not int or max_cached_owners < 1:
             raise ValueError("max_cached_owners must be a positive integer")
+        from memory_core.indexing.semantic import IndexPolicy
+
+        self.index_policy = IndexPolicy.model_validate(index_policy or IndexPolicy())
         self.max_cached_owners = max_cached_owners
         self.retrieval_policy = retrieval_policy or RetrievalPolicy()
         self.store = Store(db)
@@ -93,10 +97,35 @@ class MemoryService:
             )
         cache = self._caches.get(owner)
         if cache is None:
-            cache = OwnerCache(self.spec.dimensions, self.retrieval_policy)
+            cache = OwnerCache(
+                self.spec.dimensions,
+                self.retrieval_policy,
+                index_policy=self.index_policy,
+            )
+            if self.index_policy.backend == "hnsw":
+                saved = session.execute(
+                    text(
+                        "SELECT identity,generation,manifest,graph FROM memory_vector_snapshots WHERE owner=:o"
+                    ),
+                    {"o": owner},
+                ).first()
+                if saved and saved[0] == identity and saved[1] <= state["generation"]:
+                    try:
+                        cache.vectors.restore(saved[2], saved[3])
+                        cache.restored_generation = saved[1]
+                    except (ValueError, RuntimeError, KeyError, TypeError):
+                        cache = OwnerCache(
+                            self.spec.dimensions,
+                            self.retrieval_policy,
+                            index_policy=self.index_policy,
+                        )
             self._caches[owner] = cache
         try:
             cache.sync(session, owner, state["generation"])
+            if cache.restored_generation >= 0:
+                for uid in cache.vectors.active - cache.memories.keys():
+                    cache.vectors.remove(uid)
+                cache.restored_generation = -1
         except BaseException:
             self._caches.pop(owner, None)
             raise
@@ -104,6 +133,42 @@ class MemoryService:
         while len(self._caches) > self.max_cached_owners:
             self._caches.popitem(last=False)
         return cache, Registry(self.store.fields(session, owner)), state
+
+    async def checkpoint_indexes(self, *, force=False):
+        def save():
+            if self.index_policy.backend != "hnsw":
+                return 0
+            saved = 0
+            with self._lock:
+                for owner, cache in list(self._caches.items()):
+                    if (
+                        not force
+                        and cache.vectors.updates
+                        < self.index_policy.checkpoint_after_updates
+                    ):
+                        continue
+                    with self.store.transaction(owner) as session:
+                        cache, _, state = self._snapshot(session, owner)
+                        generation = state["generation"]
+                    manifest, graph = cache.vectors.snapshot()
+                    with self.store.transaction(owner) as session:
+                        session.execute(
+                            text("""INSERT INTO memory_vector_snapshots VALUES (:o,:i,:g,:m,:b)
+                            ON CONFLICT(owner) DO UPDATE SET identity=excluded.identity,generation=excluded.generation,
+                            manifest=excluded.manifest,graph=excluded.graph"""),
+                            {
+                                "o": owner,
+                                "i": self.spec.model_dump_json(),
+                                "g": generation,
+                                "m": manifest,
+                                "b": graph,
+                            },
+                        )
+                    cache.vectors.updates = 0
+                    saved += 1
+            return saved
+
+        return await asyncio.to_thread(save)
 
     async def _vector(self, supplied, value):
         if supplied is None:
@@ -183,6 +248,15 @@ class MemoryService:
         def run():
             with self._lock, self.store.transaction(owner_id) as session:
                 cache, registry, state = self._snapshot(session, owner_id)
+                if Status.SUPERSEDED in request.statuses:
+                    from .history import recall_history
+
+                    return RecallResponse(
+                        hits=recall_history(
+                            self, session, owner_id, request, vector, registry
+                        ),
+                        generation=state["generation"],
+                    )
                 ids = cache.eligible(request.project_id, active=False) & set.union(
                     set(), *(cache.by_status[status] for status in request.statuses)
                 )
@@ -229,7 +303,7 @@ class MemoryService:
                     raise SchemaError(
                         "new records must be active at revision 1; use reconciliation for changes"
                     )
-                if memory.id in cache.memories:
+                if self.store.contains(session, owner_id, memory.id):
                     raise ConflictError("memory id already exists")
                 ids = cache.eligible(getattr(memory.scope, "project_id", None))
                 neighbors = [
@@ -238,7 +312,7 @@ class MemoryService:
                     )
                     for uid, score in cache.search(memory.summary, vector, ids, 20)
                 ]
-                exact = cache.equivalents.get(equivalence_key(memory), set()) & ids
+                exact = cache.equivalents.get(cache.key(memory), set()) & ids
                 if exact:
                     uid = min(exact)
                     if all(hit.memory.id != uid for hit in neighbors):
