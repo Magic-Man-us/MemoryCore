@@ -281,6 +281,8 @@ class RegisterFieldRequest(Model):
 
 
 class ListValuesRequest(Model):
+    # None retains owner-wide discovery for trusted host callers.
+    scope: Scope | None = None
     operation: Literal["list_metadata_values"] = "list_metadata_values"
     field: Identifier
     prefix: str = ""

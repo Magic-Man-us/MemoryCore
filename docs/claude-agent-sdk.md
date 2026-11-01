@@ -214,3 +214,9 @@ Official interfaces used:
 
 For maintenance continuation, retained history, local diagnostics, and growth
 benchmarks, see [Growing a local memory collection](local-memory-growth.md).
+
+Metadata-value discovery uses the same host-bound project scope as recall. The
+adapter hides `ListValuesRequest.scope` from model-controlled tool inputs and rejects
+overrides. Global tasks see global values; project tasks see global and same-project
+values. The trusted Python API can request owner-wide discovery with `scope=None`.
+See [security review](security-review.md) for the regression and dependency audit.

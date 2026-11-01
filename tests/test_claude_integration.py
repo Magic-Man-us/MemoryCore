@@ -678,3 +678,73 @@ async def test_many_tasks_stay_within_client_capacity_and_release_all_leases(mem
             ).scalar_one()
             == 0
         )
+
+
+@pytest.mark.parametrize("project", [None, "alpha"])
+async def test_metadata_discovery_respects_task_project(memory, project):
+    from memory_core.memory.models import (
+        FieldDefinition,
+        ObservationMemory,
+        ProjectScope,
+        RegisterFieldRequest,
+        RememberRequest,
+        UserScope,
+    )
+
+    await memory.call(
+        RegisterFieldRequest(definition=FieldDefinition(name="topic", type="keyword")),
+        owner_id="alice",
+    )
+    for name, scope in [
+        ("global", UserScope()),
+        ("alpha", ProjectScope(project_id="alpha")),
+        ("private-beta", ProjectScope(project_id="beta")),
+    ]:
+        await memory.call(
+            RememberRequest(
+                memory=ObservationMemory(
+                    summary=name,
+                    observation=name,
+                    scope=scope,
+                    metadata={"topic": name},
+                )
+            ),
+            owner_id="alice",
+        )
+    binding = TaskBinding(
+        memory,
+        "alice",
+        TaskContext(task_id="scoped", project_id=project),
+        "Inspect",
+        ClaudeMemoryPolicy(),
+    )
+    await binding.start()
+    async with Client(binding.sdk_server()["instance"]) as client:
+        response = await client.call_tool("list_metadata_values", {"field": "topic"})
+        assert response.structured_content["values"] == (
+            ["alpha", "global"] if project else ["global"]
+        )
+        tools = {tool.name: tool for tool in (await client.list_tools()).tools}
+        assert "scope" not in tools["list_metadata_values"].input_schema["properties"]
+        override = await client.call_tool(
+            "list_metadata_values", {"field": "topic", "scope": None}
+        )
+        assert override.is_error
+        page = await client.call_tool(
+            "list_metadata_values", {"field": "topic", "limit": 1}
+        )
+        assert page.structured_content["next_offset"] == (1 if project else None)
+        hidden = await client.call_tool(
+            "list_metadata_values", {"field": "topic", "prefix": "private"}
+        )
+        assert hidden.structured_content["values"] == []
+    from memory_core.memory.errors import SchemaError
+    from memory_core.memory.models import ListValuesRequest
+
+    with pytest.raises(SchemaError, match="scope is bound"):
+        await binding.invoke(
+            {"operation": "list_metadata_values", "field": "topic", "scope": None}
+        )
+    # The trusted owner's API retains explicitly unscoped discovery for compatibility.
+    all_values = await memory.call(ListValuesRequest(field="topic"), owner_id="alice")
+    assert all_values.values == ["alpha", "global", "private-beta"]
