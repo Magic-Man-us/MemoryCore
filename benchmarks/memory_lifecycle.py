@@ -73,7 +73,9 @@ def resident_mib():
         return None
 
 
-async def run(count, dimensions, rounds, burst):
+async def run(count, dimensions, rounds, burst, backend="exact"):
+    from memory_core import IndexPolicy
+
     embedder = SyntheticEmbedder(dimensions)
     spec = EmbeddingSpec(
         model_id="synthetic-lifecycle", revision="1", dimensions=dimensions
@@ -89,7 +91,11 @@ async def run(count, dimensions, rounds, burst):
 
         def open_runtime():
             return MemoryCore.local(
-                path, embedding_spec=spec, embedder=embedder, maintenance=policy
+                path,
+                embedding_spec=spec,
+                embedder=embedder,
+                maintenance=policy,
+                index_policy=IndexPolicy(backend=backend),
             )
 
         memory = open_runtime()
@@ -254,6 +260,7 @@ async def run(count, dimensions, rounds, burst):
         memory.service.store.db.engine.dispose()
         return {
             "seed_count": count,
+            "backend": backend,
             "dimensions": dimensions,
             "seed_seconds": seed_seconds,
             "cold_recall_seconds": cold_seconds,
@@ -268,6 +275,7 @@ async def run(count, dimensions, rounds, burst):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--backend", choices=["exact", "hnsw"], default="exact")
     parser.add_argument("--count", type=int, default=5000)
     parser.add_argument("--dimensions", type=int, default=384)
     parser.add_argument("--rounds", type=int, default=2)
@@ -277,7 +285,9 @@ if __name__ == "__main__":
         parser.error("count>=8, dimensions>=2, rounds>=1, burst>=4 required")
     print(
         json.dumps(
-            asyncio.run(run(args.count, args.dimensions, args.rounds, args.burst)),
+            asyncio.run(
+                run(args.count, args.dimensions, args.rounds, args.burst, args.backend)
+            ),
             indent=2,
         )
     )

@@ -47,7 +47,8 @@ pass resumes from the stored cursor.
 
 ## Active memory and retained history
 
-Active and disputed records remain in the resident cache. Disputed preferences must
+Active and disputed records retain resident index entries. Full payloads use a bounded
+LRU cache and are loaded from SQLite as needed. Disputed preferences must
 remain available so unresolved conflicts can block an action. Superseded records
 leave the vector, lexical, metadata, and payload caches when changes synchronize.
 They are not deleted from SQLite, and their IDs cannot be reused.
@@ -61,8 +62,8 @@ normal recall and can scan the owner's retained collection.
 `max_cached_owners` limits resident owner indexes, not bytes within one owner.
 An owner's active index still grows with its active memories. The default native
 vector search is exact and scans eligible vectors; returning a small result does
-not imply sublinear search. Metadata filters reduce eligible work. No approximate
-index or automatic clustering policy is silently enabled by these changes.
+not imply sublinear search. Metadata filters reduce eligible work. An optional HNSW backend is described in [indexed memory](indexed-memory.md); it is
+not silently enabled.
 
 ## Embedding storage
 
@@ -77,8 +78,9 @@ keep a backup if a downgrade may be needed.
 Consolidation reduces active retrieval work, not all historical disk usage. Events,
 audit records, completed jobs, dream proposals, and superseded records remain
 retained. This release does not silently prune evidence or idempotency records,
-run `VACUUM`, or promise indefinitely bounded disk usage. A retention policy needs
-explicit requirements for history and replay before deleting those records.
+run `VACUUM`, or promise indefinitely bounded disk usage. Optional retention now compacts completed work and moves eligible history to lossless
+archives; see [indexed memory and retention](indexed-memory.md) for its explicit replay
+window and remaining disk-growth limits.
 
 ## Local measurements
 
@@ -136,7 +138,8 @@ including rare exceptions and contradictory preferences, before promoting them.
 
 ## Recorded local run
 
-These are single-machine results from the committed synthetic workload, with two
+These are historical baseline results before bounded payload caching/HNSW, from the
+committed synthetic workload, with two
 incremental rounds at each size. They are observations, not hardware-independent
 performance guarantees. Each size ran in a fresh Python 3.13 process.
 

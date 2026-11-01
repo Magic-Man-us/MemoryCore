@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import zlib
 from datetime import UTC, datetime
 
 from sqlalchemy import text
@@ -21,7 +22,7 @@ from .models import (
     MemoryHit,
     Status,
 )
-from .reconciliation import apply_reconciliation, equivalence_key, equivalent
+from .reconciliation import apply_reconciliation, equivalent
 
 
 def due(service, owner):
@@ -61,7 +62,8 @@ async def plan(service, owner, request, *, scan=None):
     rows, state, cache = await asyncio.to_thread(snapshot)
 
     def group_for(uid, raw):
-        with service._lock:
+        with service._lock, service.store.db.session_scope() as read_session:
+            cache.memories.bind(read_session, owner)
             if cache.generation != state["generation"]:
                 raise ConflictError("memory changed during dream snapshot; replan")
             memory = cache.memories.get(uid)
@@ -76,7 +78,7 @@ async def plan(service, owner, request, *, scan=None):
             )
             # Prefer one exact duplicate within the existing neighbor budget.
             # This remains useful even when vector similarity is zero.
-            exact = cache.equivalents.get(equivalence_key(memory), set()) & ids
+            exact = cache.equivalents.get(cache.key(memory), set()) & ids
             if exact:
                 target = min(exact)
                 hits = [(target, 0.0)] + [(i, s) for i, s in hits if i != target]
@@ -163,7 +165,16 @@ async def apply(service, owner, plan_id, *, on_commit=None, _advance_cursor=True
                 {"o": owner, "id": plan_id},
             ).scalar_one_or_none()
             if raw is None:
-                raise ConflictError("unknown dream plan")
+                archived = session.execute(
+                    text(
+                        "SELECT payload FROM memory_dream_archives WHERE owner=:o AND id=:id"
+                    ),
+                    {"o": owner, "id": plan_id},
+                ).scalar()
+                if archived is not None:
+                    raw = zlib.decompress(archived)
+                else:
+                    raise ConflictError("unknown dream plan")
             result = DreamPlan.model_validate_json(raw)
             if result.applied:
                 raise ConflictError("dream plan already applied")

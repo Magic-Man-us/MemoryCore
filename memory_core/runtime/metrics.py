@@ -14,6 +14,8 @@ class MemoryMeasurements(Model):
     memories_by_status: dict[str, int]
     jobs_by_status: dict[str, int]
     oldest_ready_wait_seconds: float | None
+    resident_payloads: int = 0
+    archived_records: int = 0
     cached_records: int
     records_after_dream_cursor: int
     # File/page measurements cover the whole SQLite database, not one owner.
@@ -62,6 +64,10 @@ def measure(runtime, owner):
         )
         cache = runtime.service._caches.get(owner)
         cached = len(cache.memories) if cache else 0
+        resident = len(cache.memories.resident) if cache else 0
+        archived = session.execute(
+            text("SELECT COUNT(*) FROM memory_archives WHERE owner=:o"), {"o": owner}
+        ).scalar_one()
         filename = runtime.service.store.db.engine.url.database
     path = Path(filename) if filename and filename != ":memory:" else None
 
@@ -77,6 +83,8 @@ def measure(runtime, owner):
         jobs_by_status=jobs,
         oldest_ready_wait_seconds=now - oldest if oldest is not None else None,
         cached_records=cached,
+        resident_payloads=resident,
+        archived_records=archived,
         records_after_dream_cursor=remaining,
         database_file_bytes=size(path),
         wal_file_bytes=size(Path(str(path) + "-wal") if path else None),

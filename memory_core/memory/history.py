@@ -1,5 +1,6 @@
 """Explicit historical recall streams retained records without growing the hot cache."""
 
+import zlib
 from heapq import nsmallest
 
 from sqlalchemy import text
@@ -12,7 +13,9 @@ def recall_history(service, session, owner, request, vector, registry):
     if request.filter is not None:
         registry.check_filter(request.filter)
     rows = session.execute(
-        text("SELECT payload,embedding FROM memories_v1 WHERE owner=:o ORDER BY id"),
+        text(
+            "SELECT payload,embedding FROM memories_v1 WHERE owner=:o UNION ALL SELECT payload,embedding FROM memory_archives WHERE owner=:o"
+        ),
         {"o": owner},
     )
     best = []
@@ -20,7 +23,9 @@ def recall_history(service, session, owner, request, vector, registry):
         cache = OwnerCache(
             service.spec.dimensions, service.retrieval_policy, include_retired=True
         )
-        cache.update_rows(batch)
+        cache.update_rows(
+            [(zlib.decompress(p) if isinstance(p, bytes) else p, e) for p, e in batch]
+        )
         ids = cache.eligible(request.project_id, active=False) & set.union(
             set(), *(cache.by_status[status] for status in request.statuses)
         )

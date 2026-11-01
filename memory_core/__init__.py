@@ -48,6 +48,7 @@ from .memory import REQUEST_ADAPTER, RESPONSE_ADAPTER, EmbeddingSpec, MemoryServ
 
 __all__ += ["REQUEST_ADAPTER", "RESPONSE_ADAPTER", "EmbeddingSpec", "MemoryService"]
 
-from .runtime import MemoryCore
+from .indexing.semantic import IndexPolicy
+from .runtime import MemoryCore, RetentionPolicy, RetentionResult
 
-__all__ += ["MemoryCore"]
+__all__ += ["IndexPolicy", "MemoryCore", "RetentionPolicy", "RetentionResult"]

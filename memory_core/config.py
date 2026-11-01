@@ -113,6 +113,7 @@ def build_memory_system(
     dream_after_writes: int = 100,
     retrieval_policy: RetrievalPolicy | None = None,
     max_cached_owners: int = 16,
+    index_policy=None,
 ) -> MemorySystem:
     """Create a fully-wired MemorySystem from settings and optional overrides.
 
@@ -166,5 +167,6 @@ def build_memory_system(
             dream_after_writes=dream_after_writes,
             retrieval_policy=retrieval_policy,
             max_cached_owners=max_cached_owners,
+            index_policy=index_policy,
         )
     return system

@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import time
+
+from sqlalchemy import text
 
 from memory_core.memory import dream
 from memory_core.memory.models import (
@@ -35,6 +38,8 @@ class Worker:
         self._runner = None
         self._stop = asyncio.Event()
         self.last_error = None
+        self._retention_after = 0
+        self._retention_owner = ""
 
     async def start(self):
         if self._runner is None:
@@ -66,6 +71,34 @@ class Worker:
     async def run_once(self, *, owner_id=None):
         claim = await asyncio.to_thread(self.queue.claim, owner_id)
         if claim is None:
+            await self.service.checkpoint_indexes()
+            if (
+                self.runtime.retention.enabled
+                and time.monotonic() >= self._retention_after
+            ):
+                self._retention_after = (
+                    time.monotonic() + self.runtime.retention.interval_seconds
+                )
+
+                def next_owner():
+                    with (
+                        self.service._lock,
+                        self.service.store.db.session_scope() as session,
+                    ):
+                        return session.execute(
+                            text(
+                                "SELECT owner FROM memory_owners WHERE owner>:o ORDER BY owner LIMIT 1"
+                            ),
+                            {"o": self._retention_owner},
+                        ).scalar()
+
+                owner = owner_id or await asyncio.to_thread(next_owner)
+                if owner is None:
+                    self._retention_owner = ""
+                    owner = await asyncio.to_thread(next_owner)
+                if owner:
+                    await self.runtime.maintain(owner_id=owner)
+                    self._retention_owner = owner
             return False
         try:
             async with asyncio.timeout(self.policy.job_timeout_seconds):

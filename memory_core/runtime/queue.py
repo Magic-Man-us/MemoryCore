@@ -15,6 +15,12 @@ from memory_core.memory.models import TaskContext
 from .models import JobView, TaskResponse
 
 DDL = (
+    """CREATE TABLE IF NOT EXISTS memory_job_retention (
+        owner TEXT NOT NULL,id TEXT NOT NULL,completed_at REAL NOT NULL,
+        compacted INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(owner,id))""",
+    """CREATE TABLE IF NOT EXISTS memory_event_archives (
+        owner TEXT NOT NULL,task_id TEXT NOT NULL,id TEXT NOT NULL,job_id TEXT NOT NULL,
+        payload BLOB NOT NULL,archived_at REAL NOT NULL,PRIMARY KEY(owner,task_id,id))""",
     """CREATE TABLE IF NOT EXISTS memory_tasks (
     owner TEXT NOT NULL, id TEXT NOT NULL, context TEXT NOT NULL, objective TEXT NOT NULL,
     sources TEXT NOT NULL, completion TEXT, PRIMARY KEY(owner,id))""",
@@ -26,6 +32,8 @@ DDL = (
     payload TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
     available REAL NOT NULL DEFAULT 0, lease_until REAL, token TEXT, result TEXT, error TEXT,
     PRIMARY KEY(owner,id))""",
+    "CREATE INDEX IF NOT EXISTS memory_job_retention_age ON memory_job_retention(owner,compacted,completed_at,id)",
+    "CREATE INDEX IF NOT EXISTS memory_jobs_task ON memory_jobs(owner,task_id,status)",
     "CREATE INDEX IF NOT EXISTS memory_jobs_ready ON memory_jobs(status,available,lease_until)",
     """CREATE TABLE IF NOT EXISTS memory_gaps (
     owner TEXT NOT NULL, task_id TEXT NOT NULL, id TEXT NOT NULL, gap TEXT NOT NULL,
@@ -109,6 +117,16 @@ class Queue:
             if old[0] != raw:
                 raise ConflictError("event ID reused with different content")
             return old[1]
+        expired = session.execute(
+            text(
+                "SELECT 1 FROM memory_event_archives WHERE owner=:o AND task_id=:t AND id=:id"
+            ),
+            {"o": owner, "t": task_id, "id": event_id},
+        ).first()
+        if expired:
+            raise ConflictError(
+                "event replay window expired; evidence remains archived"
+            )
         task = self.task(session, owner, task_id)
         if task.outcome is not None:
             raise ConflictError("task is already complete")
@@ -218,6 +236,13 @@ class Queue:
                 "e": error,
             },
         )
+        if status == "done":
+            session.execute(
+                text(
+                    "INSERT OR IGNORE INTO memory_job_retention(owner,id,completed_at) VALUES (:o,:id,:t)"
+                ),
+                {"o": claim.owner, "id": claim.id, "t": time.time()},
+            )
 
     def fail(self, claim, error):
         with self.service._lock, self.transaction(claim.owner) as session:

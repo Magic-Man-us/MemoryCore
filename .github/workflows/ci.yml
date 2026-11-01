@@ -62,11 +62,11 @@ jobs:
       - name: Install
         run: |
           uv venv
-          uv pip install -e ".[dev,mcp,claude]"
+          uv pip install -e ".[dev,mcp,claude,ann]"
           uv run maturin develop --uv
 
       - name: Tests
-        run: uv run --extra dev --extra mcp --extra claude pytest -q
+        run: uv run --extra dev --extra mcp --extra claude --extra ann pytest -q
 
       - name: Examples
         working-directory: ${{ runner.temp }}
