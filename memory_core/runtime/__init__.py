@@ -1,5 +1,6 @@
 """Task sessions, evidence-backed knowledge resolution, and durable maintenance."""
 
+from .context import ContextBudgetError, render_task_context
 from .core import MemoryCore
 from .models import (
     Evidence,
@@ -17,6 +18,7 @@ from .retention import RetentionPolicy, RetentionResult
 from .tools import MemoryTools
 
 __all__ = [
+    "ContextBudgetError",
     "Evidence",
     "Finding",
     "KnowledgeGap",
@@ -31,4 +33,5 @@ __all__ = [
     "TaskOutcome",
     "TaskRunResult",
     "UnresolvedKnowledge",
+    "render_task_context",
 ]

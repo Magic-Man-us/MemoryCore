@@ -236,7 +236,7 @@ class ClaudeMemoryAgent:
             configured = self._options(options, binding, hooks)
             # Invalid options are rejected before persisting a task or launching a client.
             async with asyncio.timeout(self.policy.run_timeout_seconds):
-                await binding.start()
+                prepared = await binding.start()
                 for gap in required_knowledge:
                     await binding.invoke(
                         {
@@ -245,7 +245,8 @@ class ClaudeMemoryAgent:
                             "gap": gap.model_dump(mode="json"),
                         }
                     )
-                prepared = await binding.prepare(guard=False)
+                if required_knowledge:
+                    prepared = await binding.prepare(guard=False)
                 prompt = (
                     f"{INSTRUCTIONS}\n\nTask: {objective}\n\n{binding.render(prepared)}"
                 )

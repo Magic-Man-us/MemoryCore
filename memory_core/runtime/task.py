@@ -32,9 +32,10 @@ class TaskSession:
         return False
 
     async def prepare(self):
-        self.prepared = await self.runtime.call(
+        self.prepared = await self.runtime._prepare_task(
             PrepareTaskRequest(task_id=self.context.task_id),
-            owner_id=self.owner,
+            self.owner,
+            cached=self.prepared,
         )
         return self.prepared
 
@@ -62,9 +63,10 @@ class TaskSession:
 
     async def before_action(self):
         """Refresh context, then refuse conflicts or unresolved declared gaps."""
-        self.prepared = await self.runtime.call(
+        self.prepared = await self.runtime._prepare_task(
             PrepareTaskRequest(task_id=self.context.task_id, guard=True),
-            owner_id=self.owner,
+            self.owner,
+            cached=self.prepared,
         )
         return self.prepared
 
