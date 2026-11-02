@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 
 import pytest
@@ -355,3 +356,38 @@ async def test_support_already_present_in_preferences_is_counted_as_represented_
     unchanged = await session.prepare(request(query="task"))
     assert unchanged.update is ContextUpdate.UNCHANGED
     assert unchanged.deduplicated_supporting == 1
+
+
+@pytest.mark.parametrize("change", ["reset", "prepare", "prepare_and_commit"])
+async def test_guard_rechecks_session_identity_after_receipt_validation(
+    memory, monkeypatch, change
+):
+    runtime, _ = memory
+    await save(runtime, pref())
+    session = SessionContext(runtime, owner_id="alice", count_tokens=len)
+    current = await session.prepare(request())
+    session.commit(current)
+    validated, release = asyncio.Event(), asyncio.Event()
+    original_validate = runtime.service.validate_context
+
+    async def validate_then_pause(receipt, context, *, owner_id):
+        await original_validate(receipt, context, owner_id=owner_id)
+        validated.set()
+        await release.wait()
+
+    monkeypatch.setattr(runtime.service, "validate_context", validate_then_pause)
+    guard = asyncio.create_task(session.before_action(current))
+    try:
+        await asyncio.wait_for(validated.wait(), 1)
+        if change == "reset":
+            session.reset()
+        else:
+            next_context = await session.prepare(request(task="next-turn"))
+            if change == "prepare_and_commit":
+                session.commit(next_context)
+        release.set()
+        with pytest.raises(ContextRequiredError, match="changed while validating"):
+            await guard
+    finally:
+        release.set()
+        await asyncio.gather(guard, return_exceptions=True)

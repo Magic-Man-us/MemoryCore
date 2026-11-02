@@ -189,16 +189,19 @@ class SessionContext:
         self._injected = self._pending
 
     async def before_action(self, response: SessionContextResponse) -> None:
-        if self._pending is None or self._pending.response is not response:
+        pending = self._pending
+        if pending is None or pending.response is not response:
             raise ContextRequiredError(
                 "action requires this session's latest prepared response"
             )
-        if self._injected is not self._pending:
+        if self._injected is not pending:
             raise ContextRequiredError(
                 "inject and commit prepared context before acting"
             )
         await self._memory.service.validate_context(
-            self._pending.full.receipt, self._pending.context, owner_id=self._owner_id
+            pending.full.receipt, pending.context, owner_id=self._owner_id
         )
-        if self._pending.full.preferences.conflicts:
+        if self._pending is not pending or self._injected is not pending:
+            raise ContextRequiredError("prepared context changed while validating")
+        if pending.full.preferences.conflicts:
             raise ContextRequiredError("resolve preference conflicts before acting")
