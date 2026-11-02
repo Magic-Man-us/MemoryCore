@@ -239,6 +239,13 @@ async def benchmark(options: Options) -> Report:
             cohorts = []
             for count in (1, 16, 64):
                 if count <= options.owner_count:
+                    for preference in (True, False):
+                        await measure(
+                            shared,
+                            options.model_copy(update={"repetitions": count * 5}),
+                            sessions=count,
+                            preference=preference,
+                        )
                     cohorts.append(
                         Cohort(
                             sessions=count,
