@@ -1,0 +1,123 @@
+{
+  "options": {
+    "count": 10000,
+    "dimensions": 512,
+    "repetitions": 1000,
+    "owner_count": 64
+  },
+  "process_id": 3579062,
+  "cold_10k_ms": 251.31253618746996,
+  "preference": {
+    "samples": 1000,
+    "p50_ms": 0.3204355016350746,
+    "p95_ms": 0.4548514261841774,
+    "elapsed_ms": 355.74913676828146
+  },
+  "filtered_recall": {
+    "samples": 1000,
+    "p50_ms": 3.792240284383297,
+    "p95_ms": 4.465730860829353,
+    "elapsed_ms": 3915.673597715795
+  },
+  "concurrent": [
+    {
+      "sessions": 1,
+      "shared_owner": false,
+      "preference": {
+        "samples": 1000,
+        "p50_ms": 0.5615418776869774,
+        "p95_ms": 0.9412132203578949,
+        "elapsed_ms": 633.7509592995048
+      },
+      "recall": {
+        "samples": 1000,
+        "p50_ms": 1.0666679590940475,
+        "p95_ms": 1.4674542471766472,
+        "elapsed_ms": 1084.3706438317895
+      }
+    },
+    {
+      "sessions": 16,
+      "shared_owner": false,
+      "preference": {
+        "samples": 1008,
+        "p50_ms": 5.887266248464584,
+        "p95_ms": 11.489930562675,
+        "elapsed_ms": 720.0430277734995
+      },
+      "recall": {
+        "samples": 1008,
+        "p50_ms": 7.404368836432695,
+        "p95_ms": 14.501016587018967,
+        "elapsed_ms": 905.2558233961463
+      }
+    },
+    {
+      "sessions": 64,
+      "shared_owner": false,
+      "preference": {
+        "samples": 1024,
+        "p50_ms": 18.494147807359695,
+        "p95_ms": 34.8114799708128,
+        "elapsed_ms": 588.6159827932715
+      },
+      "recall": {
+        "samples": 1024,
+        "p50_ms": 29.034589882940054,
+        "p95_ms": 52.50610504299402,
+        "elapsed_ms": 899.2297807708383
+      }
+    },
+    {
+      "sessions": 16,
+      "shared_owner": true,
+      "preference": {
+        "samples": 1008,
+        "p50_ms": 4.5699467882514,
+        "p95_ms": 9.091673418879509,
+        "elapsed_ms": 555.8657171204686
+      },
+      "recall": {
+        "samples": 1008,
+        "p50_ms": 6.507547106593847,
+        "p95_ms": 13.049812987446785,
+        "elapsed_ms": 823.1693599373102
+      }
+    },
+    {
+      "sessions": 64,
+      "shared_owner": true,
+      "preference": {
+        "samples": 1024,
+        "p50_ms": 16.352145932614803,
+        "p95_ms": 34.18140672147274,
+        "elapsed_ms": 567.6916232332587
+      },
+      "recall": {
+        "samples": 1024,
+        "p50_ms": 26.08273597434163,
+        "p95_ms": 47.07358032464981,
+        "elapsed_ms": 801.9037703052163
+      }
+    }
+  ],
+  "residency": {
+    "owners": 17,
+    "records_per_owner": 1001,
+    "before_mib": 158.8125,
+    "hydrated_mib": 279.85546875,
+    "cold": {
+      "samples": 17,
+      "p50_ms": 26.047606952488422,
+      "p95_ms": 84.32999532669783,
+      "elapsed_ms": 499.19259641319513
+    },
+    "revisit": {
+      "samples": 17,
+      "p50_ms": 25.7473262026906,
+      "p95_ms": 27.895960956811905,
+      "elapsed_ms": 444.71804425120354
+    }
+  },
+  "notes": "Synthetic precomputed vectors; no model or network calls. Concurrent latency includes executor and database queueing. RSS is process residency, not an exact per-cache allocation count. Concurrent cohorts retain all owners; residency uses the default 16-owner limit."
+}
