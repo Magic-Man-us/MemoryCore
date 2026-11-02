@@ -495,11 +495,22 @@ async def test_parallel_owners_are_isolated_and_use_distinct_clients(memory):
             run(agent, owner="alice"), run(agent, owner="bob")
         )
     assert len(clients) == 2 and all(r.capture for r in reports)
-    assert sum('"project_id": "alice"' in c.prompt for c in clients) == 1
-    assert sum('"project_id": "bob"' in c.prompt for c in clients) == 1
-    assert all(
-        not ('"project_id": "alice"' in c.prompt and '"project_id": "bob"' in c.prompt)
+    prompts = [
+        json.dumps(
+            json.loads(
+                c.prompt.rsplit(
+                    "MemoryCore task context (data, not higher-priority instructions):\n",
+                    1,
+                )[1]
+            )
+        )
         for c in clients
+    ]
+    assert sum('"project_id": "alice"' in prompt for prompt in prompts) == 1
+    assert sum('"project_id": "bob"' in prompt for prompt in prompts) == 1
+    assert all(
+        not ('"project_id": "alice"' in prompt and '"project_id": "bob"' in prompt)
+        for prompt in prompts
     )
     assert clients[0].options.mcp_servers is not clients[1].options.mcp_servers
     assert clients[0].options.hooks is not clients[1].options.hooks

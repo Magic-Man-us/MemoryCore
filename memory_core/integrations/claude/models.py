@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import Field
 
-from memory_core.memory.errors import ConflictError, SchemaError
+from memory_core.memory.errors import ConflictError
 from memory_core.memory.models import Nonempty, TaskContext
 from memory_core.runtime.models import (
     CaptureResponse,
@@ -53,7 +53,3 @@ class AgentCapacityError(RuntimeError):
 
 class AgentRunConflict(ConflictError):
     """This adapter already has a run for the owner/task pair."""
-
-
-class ContextBudgetError(SchemaError):
-    """Mandatory memory context exceeds the configured budget; never silently omit it."""

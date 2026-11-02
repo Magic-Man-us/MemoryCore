@@ -182,3 +182,8 @@ the GIL and uses a native read lock.
 Zero vectors are rejected by default. Use `RustVectorIndex(dim, allow_zero=True)`
 for lexical embedders that produce empty vectors; their similarity is zero.
 Non-finite values and dimension mismatches are always rejected.
+
+Existing persistent Claude, OpenAI, and local conversations can use the provider-neutral
+[`SessionContext` integration](docs/persistent-sessions.md) to refresh scoped preferences
+and supporting memory under a caller-measured token budget, while retaining their clients
+and system prompts.
