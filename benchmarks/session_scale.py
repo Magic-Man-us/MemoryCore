@@ -49,6 +49,7 @@ class Timing(BaseModel):
 
 class Cohort(BaseModel):
     sessions: int
+    shared_owner: bool = False
     preference: Timing
     recall: Timing
 
@@ -145,7 +146,12 @@ def seed(
 
 
 async def measure(
-    service: MemoryService, options: Options, *, sessions: int, preference: bool
+    service: MemoryService,
+    options: Options,
+    *,
+    sessions: int,
+    preference: bool,
+    shared_owner: bool = False,
 ) -> Timing:
     context = TaskContext(
         task_id="benchmark", project_id="project", attributes={"languages": ["python"]}
@@ -180,7 +186,7 @@ async def measure(
     for _ in range(math.ceil(options.repetitions / sessions)):
         async with asyncio.TaskGroup() as group:
             for number in range(sessions):
-                group.create_task(turn(f"owner-{number}"))
+                group.create_task(turn(f"owner-{0 if shared_owner else number}"))
     return timing(samples, perf_counter() - started)
 
 
@@ -237,26 +243,35 @@ async def benchmark(options: Options) -> Report:
                 preference=True,
             )
             cohorts = []
-            for count in (1, 16, 64):
-                if count <= options.owner_count:
+            for shared_owner in (False, True):
+                for count in (1, 16, 64):
+                    if count > options.owner_count or (shared_owner and count == 1):
+                        continue
                     for preference in (True, False):
                         await measure(
                             shared,
                             options.model_copy(update={"repetitions": count * 5}),
                             sessions=count,
                             preference=preference,
+                            shared_owner=shared_owner,
                         )
                     cohorts.append(
                         Cohort(
                             sessions=count,
+                            shared_owner=shared_owner,
                             preference=await measure(
-                                shared, options, sessions=count, preference=True
+                                shared,
+                                options,
+                                sessions=count,
+                                preference=True,
+                                shared_owner=shared_owner,
                             ),
                             recall=await measure(
                                 shared,
                                 options,
                                 sessions=count,
                                 preference=False,
+                                shared_owner=shared_owner,
                             ),
                         )
                     )
