@@ -187,3 +187,5 @@ Existing persistent Claude, OpenAI, and local conversations can use the provider
 [`SessionContext` integration](docs/persistent-sessions.md) to refresh scoped preferences
 and supporting memory under a caller-measured token budget, while retaining their clients
 and system prompts.
+
+[Session performance](docs/session-performance.md) records concurrency, retrieval, and cache-residency baselines.
