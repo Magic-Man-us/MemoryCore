@@ -26,14 +26,24 @@ from .reconciliation import apply_reconciliation, equivalent
 
 
 def due(service, owner):
-    with service._lock, service.store.transaction(owner) as session:
+    with (
+        service._owner_lock(owner),
+        service.store.read_transaction(
+            owner, embedding_spec=service.spec.model_dump_json()
+        ) as session,
+    ):
         state = service.store.state(session, owner)
         return state["writes"] - state["dream_writes"] >= service.dream_after_writes
 
 
 async def plan(service, owner, request, *, scan=None):
     def snapshot():
-        with service._lock, service.store.transaction(owner) as session:
+        with (
+            service._owner_lock(owner),
+            service.store.read_transaction(
+                owner, embedding_spec=service.spec.model_dump_json()
+            ) as session,
+        ):
             cache, _, state = service._snapshot(session, owner)
             # Walk changed records in generation order; ties are included using
             # a stable ID cursor encoded in the plan's source batch (no full payload scan).
@@ -62,9 +72,18 @@ async def plan(service, owner, request, *, scan=None):
     rows, state, cache = await asyncio.to_thread(snapshot)
 
     def group_for(uid, raw):
-        with service._lock, service.store.db.session_scope() as read_session:
+        with (
+            service._owner_lock(owner),
+            service.store.read_transaction(
+                owner, embedding_spec=service.spec.model_dump_json()
+            ) as read_session,
+        ):
             cache.memories.bind(read_session, owner)
-            if cache.generation != state["generation"]:
+            current = service.store.state(read_session, owner)
+            if (
+                cache.generation != state["generation"]
+                or current["generation"] != state["generation"]
+            ):
                 raise ConflictError("memory changed during dream snapshot; replan")
             memory = cache.memories.get(uid)
             if memory is None or memory.status != Status.ACTIVE or not raw:
@@ -138,7 +157,7 @@ async def plan(service, owner, request, *, scan=None):
     )
 
     def save():
-        with service._lock, service.store.transaction(owner) as session:
+        with service._owner_lock(owner), service.store.transaction(owner) as session:
             current = service.store.state(session, owner)
             if current["generation"] != result.generation:
                 raise ConflictError("memory changed while dreaming; replan")
@@ -159,7 +178,12 @@ async def plan(service, owner, request, *, scan=None):
 
 async def apply(service, owner, plan_id, *, on_commit=None, _advance_cursor=True):
     def load():
-        with service._lock, service.store.transaction(owner) as session:
+        with (
+            service._owner_lock(owner),
+            service.store.read_transaction(
+                owner, embedding_spec=service.spec.model_dump_json()
+            ) as session,
+        ):
             raw = session.execute(
                 text("SELECT payload FROM memory_dreams WHERE owner=:o AND id=:id"),
                 {"o": owner, "id": plan_id},
@@ -193,7 +217,10 @@ async def apply(service, owner, plan_id, *, on_commit=None, _advance_cursor=True
 
     def commit():
         try:
-            with service._lock, service.store.transaction(owner) as session:
+            with (
+                service._owner_lock(owner),
+                service.store.transaction(owner) as session,
+            ):
                 cache, registry, state = service._snapshot(session, owner)
                 if state["generation"] != result.generation:
                     raise ConflictError("dream plan is stale; replan")
@@ -325,7 +352,7 @@ async def apply(service, owner, plan_id, *, on_commit=None, _advance_cursor=True
         except BaseException:
             # Only rollback invalidates speculative cache state; successful commits
             # are picked up incrementally by the next snapshot.
-            with service._lock:
+            with service._cache_lock:
                 service._caches.pop(owner, None)
             raise
 

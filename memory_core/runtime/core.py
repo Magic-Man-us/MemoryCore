@@ -137,7 +137,10 @@ class MemoryCore:
 
     async def _begin(self, request, owner):
         def existing():
-            with self.service._lock, self.queue.transaction(owner) as session:
+            with (
+                self.service._owner_lock(owner),
+                self.service.store.read_transaction(owner) as session,
+            ):
                 row = session.execute(
                     text(
                         "SELECT objective,context FROM memory_tasks WHERE owner=:o AND id=:t"
@@ -196,7 +199,10 @@ class MemoryCore:
         )
 
         def save():
-            with self.service._lock, self.queue.transaction(owner) as session:
+            with (
+                self.service._owner_lock(owner),
+                self.queue.transaction(owner) as session,
+            ):
                 session.execute(
                     text("""INSERT OR IGNORE INTO memory_tasks
                     (owner,id,context,objective,sources) VALUES (:o,:t,:c,:q,:s)"""),
@@ -218,7 +224,7 @@ class MemoryCore:
         return await asyncio.to_thread(save)
 
     def _record(self, request, owner, *, transaction_guard=None):
-        with self.service._lock, self.queue.transaction(owner) as session:
+        with self.service._owner_lock(owner), self.queue.transaction(owner) as session:
             if transaction_guard is not None:
                 transaction_guard(session)
             self.queue.task(session, owner, request.task_id)
@@ -313,7 +319,10 @@ class MemoryCore:
                 )
 
     def _status(self, request, owner):
-        with self.service._lock, self.queue.transaction(owner) as session:
+        with (
+            self.service._owner_lock(owner),
+            self.service.store.read_transaction(owner) as session,
+        ):
             condition = " AND status=:s" if request.status else ""
             rows = (
                 session.execute(
@@ -340,7 +349,7 @@ class MemoryCore:
             )
 
     def _review(self, request, owner):
-        with self.service._lock, self.queue.transaction(owner) as session:
+        with self.service._owner_lock(owner), self.queue.transaction(owner) as session:
             row = (
                 session.execute(
                     text("SELECT * FROM memory_jobs WHERE owner=:o AND id=:id"),
@@ -380,7 +389,7 @@ class MemoryCore:
             return ReviewResponse(job=self.queue.view(row))
 
     def _retry(self, request, owner):
-        with self.service._lock, self.queue.transaction(owner) as session:
+        with self.service._owner_lock(owner), self.queue.transaction(owner) as session:
             changed = session.execute(
                 text("""UPDATE memory_jobs SET status='pending',
                 attempts=0,available=0,result=NULL,error=NULL,token=NULL,lease_until=NULL
@@ -438,7 +447,12 @@ class MemoryCore:
 
     async def _prepare_task(self, request, owner, *, cached=None):
         def load():
-            with self.service._lock, self.queue.transaction(owner) as session:
+            with (
+                self.service._owner_lock(owner),
+                self.service.store.read_transaction(
+                    owner, embedding_spec=self.service.spec.model_dump_json()
+                ) as session,
+            ):
                 return self.queue.task(session, owner, request.task_id)
 
         task = await asyncio.to_thread(load)
@@ -462,7 +476,12 @@ class MemoryCore:
 
         def collect():
 
-            with self.service._lock, self.queue.transaction(owner) as session:
+            with (
+                self.service._owner_lock(owner),
+                self.service.store.read_transaction(
+                    owner, embedding_spec=self.service.spec.model_dump_json()
+                ) as session,
+            ):
                 current = self.queue.task(session, owner, request.task_id)
                 if request.guard:
                     if current.outcome is not None:

@@ -29,7 +29,11 @@ class MemoryMeasurements(Model):
 def measure(runtime, owner):
     if not owner:
         raise ValueError("authenticated owner must be nonempty")
-    with runtime.service._lock, runtime.service.store.db.session_scope() as session:
+    with (
+        runtime.service._owner_lock(owner),
+        runtime.service.store.db.session_scope() as session,
+    ):
+        session.execute(text("BEGIN"))
         memories = dict(
             session.execute(
                 text("""SELECT json_extract(payload,'$.status'),COUNT(*)

@@ -14,7 +14,7 @@ from memory_core._native import PyVectorIndex
 from memory_core.indexing.semantic import HnswIndex, IndexPolicy
 from memory_core.storage.codec import decode_embedding
 
-from .metadata import MetadataIndex, value_key
+from .metadata import MetadataIndex, Registry, value_key
 from .models import MEMORY_ADAPTER, RetrievalPolicy
 from .payloads import Payloads
 from .reconciliation import equivalence_key
@@ -46,6 +46,8 @@ class OwnerCache:
         self.include_retired = include_retired
         self.policy = policy
         self.generation = -1
+        self.registry = Registry([])
+        self.registry_generation = -1
         self.index_policy = index_policy or IndexPolicy()
         self.memories = (
             {} if include_retired else Payloads(self.index_policy.payload_cache_size)

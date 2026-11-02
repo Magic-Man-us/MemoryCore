@@ -40,7 +40,10 @@ async def maintain(runtime, owner_id):
             datetime.now(UTC) - timedelta(days=policy.superseded_after_days)
         ).isoformat()
         counts = {}
-        with runtime.service._lock, runtime.queue.transaction(owner_id) as session:
+        with (
+            runtime.service._owner_lock(owner_id),
+            runtime.queue.transaction(owner_id) as session,
+        ):
             records = session.execute(
                 text("""SELECT id,payload,embedding FROM memories_v1
                 WHERE owner=:o AND json_extract(payload,'$.status')='superseded'
@@ -173,10 +176,8 @@ async def reclaim(runtime, *, pages=256):
         raise ValueError("pages must be between 1 and 10000")
 
     def run():
-        with (
-            runtime.service._lock,
-            runtime.service.store.db.engine.connect() as connection,
-        ):
+        with runtime.service.store.db.session_scope() as session:
+            connection = session.connection()
             mode = connection.exec_driver_sql("PRAGMA auto_vacuum").scalar_one()
             checkpoint = tuple(
                 connection.exec_driver_sql("PRAGMA wal_checkpoint(PASSIVE)").one()
