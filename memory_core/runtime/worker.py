@@ -82,7 +82,6 @@ class Worker:
 
                 def next_owner():
                     with (
-                        self.service._lock,
                         self.service.store.db.session_scope() as session,
                     ):
                         return session.execute(
@@ -116,7 +115,10 @@ class Worker:
         return True
 
     def _finish(self, claim, status, result):
-        with self.service._lock, self.queue.transaction(claim.owner) as session:
+        with (
+            self.service._owner_lock(claim.owner),
+            self.queue.transaction(claim.owner) as session,
+        ):
             self.queue.finish(session, claim, status, result)
             if claim.kind == "dream" and status == "proposed":
                 advance(
@@ -125,7 +127,10 @@ class Worker:
 
     async def _capture(self, claim):
         def load_task():
-            with self.service._lock, self.queue.transaction(claim.owner) as session:
+            with (
+                self.service._owner_lock(claim.owner),
+                self.service.store.read_transaction(claim.owner) as session,
+            ):
                 return self.queue.task(session, claim.owner, claim.task_id)
 
         task = await asyncio.to_thread(load_task)

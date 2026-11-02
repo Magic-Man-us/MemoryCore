@@ -170,3 +170,22 @@ requires no additional CI service. The [project website](https://magic-man-us.gi
 contains the earlier visual overview; this README and the linked docs describe the 0.4 API.
 
 Package metadata declares the MIT license.
+
+### Native candidate scoring
+
+`RustVectorIndex(dim)` ranks caller-selected string IDs by cosine similarity.
+`upsert(id, vector)`, `remove(id)`, and `search(query, ids, k)` operate on the
+in-memory index; persistence and authorization stay with the caller. Supply only
+authorized IDs to `search`. Equal scores sort by ID, ascending. Scoring releases
+the GIL and uses a native read lock.
+
+Zero vectors are rejected by default. Use `RustVectorIndex(dim, allow_zero=True)`
+for lexical embedders that produce empty vectors; their similarity is zero.
+Non-finite values and dimension mismatches are always rejected.
+
+Existing persistent Claude, OpenAI, and local conversations can use the provider-neutral
+[`SessionContext` integration](docs/persistent-sessions.md) to refresh scoped preferences
+and supporting memory under a caller-measured token budget, while retaining their clients
+and system prompts.
+
+[Session performance](docs/session-performance.md) records concurrency, retrieval, and cache-residency baselines.

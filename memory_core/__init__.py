@@ -1,5 +1,6 @@
 """Local typed agent memory with SQLite persistence and Rust vector search."""
 
+from ._native import PyVectorIndex as RustVectorIndex
 from .config import MemoryCoreSettings, build_memory_system, resolve_settings
 from .core import (
     Embedder,
@@ -36,6 +37,7 @@ __all__ = [
     "PurgeResult",
     "RecallResult",
     "RustMemoryIndex",
+    "RustVectorIndex",
     "ScoringWeights",
     "ShortTermStore",
     "SqlWorkingMemory",

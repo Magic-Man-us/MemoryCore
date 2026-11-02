@@ -1,7 +1,7 @@
 """Local SQLite durable state and atomic revisions using the existing Database connection.
 
-All transactions use BEGIN IMMEDIATE: separate processes serialize before reading
-reconciliation versions. Payloads are decoded only on hydration/change or selected reads.
+Writes use BEGIN IMMEDIATE for reconciliation versions. Reads use a deferred
+snapshot after one-time owner initialization.
 """
 
 from __future__ import annotations
@@ -82,6 +82,30 @@ class Store:
                 )
             yield session
             session.commit()
+
+    @contextmanager
+    def read_transaction(self, owner: str, *, embedding_spec: str | None = None):
+        if not owner:
+            raise ValueError("authenticated owner must be nonempty")
+        with self.db.session_scope() as session:
+            # Python's SQLite legacy transaction mode does not begin on SELECT.
+            session.execute(text("BEGIN"))
+            row = session.execute(
+                text("SELECT embedding_spec FROM memory_owners WHERE owner=:o"),
+                {"o": owner},
+            ).first()
+            if row is None or (embedding_spec is not None and row[0] is None):
+                session.rollback()
+                with self.transaction(owner) as initializing:
+                    if embedding_spec is not None:
+                        initializing.execute(
+                            text(
+                                "UPDATE memory_owners SET embedding_spec=:s WHERE owner=:o AND embedding_spec IS NULL"
+                            ),
+                            {"s": embedding_spec, "o": owner},
+                        )
+                session.execute(text("BEGIN"))
+            yield session
 
     @staticmethod
     def state(session, owner):

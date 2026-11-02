@@ -7,7 +7,10 @@ from sqlalchemy import text
 
 def scan_for(queue, claim):
     """Pin a high-water mark once, including across retries and process restarts."""
-    with queue.service._lock, queue.transaction(claim.owner) as session:
+    with (
+        queue.service._owner_lock(claim.owner),
+        queue.transaction(claim.owner) as session,
+    ):
         queue.assert_lease(session, claim)
         payload = json.loads(
             session.execute(

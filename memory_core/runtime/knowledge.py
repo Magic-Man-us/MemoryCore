@@ -73,7 +73,7 @@ async def resolve(runtime, request, owner, *, transaction_guard=None):
     service, queue = runtime.service, runtime.queue
 
     def begin():
-        with service._lock, queue.transaction(owner) as session:
+        with service._owner_lock(owner), queue.transaction(owner) as session:
             if transaction_guard is not None:
                 transaction_guard(session)
             task = queue.task(session, owner, request.task_id)
@@ -175,7 +175,7 @@ async def resolve(runtime, request, owner, *, transaction_guard=None):
         )
 
     def finish():
-        with service._lock, queue.transaction(owner) as session:
+        with service._owner_lock(owner), queue.transaction(owner) as session:
             if transaction_guard is not None:
                 transaction_guard(session)
             current = queue.task(session, owner, request.task_id)

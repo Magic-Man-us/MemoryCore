@@ -151,7 +151,7 @@ class Queue:
 
     def claim(self, owner=None):
         # BEGIN IMMEDIATE serializes claims across processes, including expired leases.
-        with self.service._lock, self.service.store.db.session_scope() as session:
+        with self.service.store.db.session_scope() as session:
             session.execute(text("BEGIN IMMEDIATE"))
             now = time.time()
             params = {"now": now, "max": self.policy.max_attempts}
@@ -245,7 +245,10 @@ class Queue:
             )
 
     def fail(self, claim, error):
-        with self.service._lock, self.transaction(claim.owner) as session:
+        with (
+            self.service._owner_lock(claim.owner),
+            self.transaction(claim.owner) as session,
+        ):
             try:
                 self.assert_lease(session, claim)
             except ConflictError:

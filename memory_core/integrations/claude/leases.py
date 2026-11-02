@@ -34,14 +34,14 @@ class RunLease:
 
     def validate(self):
         with (
-            self.memory.service._lock,
-            self.memory.queue.transaction(self.owner) as session,
+            self.memory.service._owner_lock(self.owner),
+            self.memory.service.store.read_transaction(self.owner) as session,
         ):
             self.check(session)
 
     def release(self):
         with (
-            self.memory.service._lock,
+            self.memory.service._owner_lock(self.owner),
             self.memory.queue.transaction(self.owner) as session,
         ):
             session.execute(
@@ -64,7 +64,10 @@ class RunLeases:
             session.commit()
 
     def claim(self, owner, task_id, seconds):
-        with self.memory.service._lock, self.memory.queue.transaction(owner) as session:
+        with (
+            self.memory.service._owner_lock(owner),
+            self.memory.queue.transaction(owner) as session,
+        ):
             row = session.execute(
                 text(
                     "SELECT expires FROM memory_agent_leases WHERE owner=:o AND task_id=:t"

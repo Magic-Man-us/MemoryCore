@@ -8,6 +8,7 @@ import secrets
 import threading
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
+from weakref import WeakValueDictionary
 
 from sqlalchemy import text
 
@@ -79,9 +80,18 @@ class MemoryService:
         self.dream_planner = dream_planner
         self.dream_after_writes = dream_after_writes
         self._caches: OrderedDict[str, OwnerCache] = OrderedDict()
-        self._lock = threading.RLock()
+        self._cache_lock = threading.RLock()
+        self._owner_locks = WeakValueDictionary()
         self._receipts = {}
         self._commit_observer = None
+
+    def _owner_lock(self, owner):
+        with self._cache_lock:
+            lock = self._owner_locks.get(owner)
+            if lock is None:
+                lock = threading.RLock()
+                self._owner_locks[owner] = lock
+            return lock
 
     def _snapshot(self, session, owner):
         state = self.store.state(session, owner)
@@ -95,7 +105,8 @@ class MemoryService:
             raise EmbeddingError(
                 "embedding model/revision/dimension differs; explicit re-embedding required"
             )
-        cache = self._caches.get(owner)
+        with self._cache_lock:
+            cache = self._caches.get(owner)
         if cache is None:
             cache = OwnerCache(
                 self.spec.dimensions,
@@ -119,35 +130,50 @@ class MemoryService:
                             self.retrieval_policy,
                             index_policy=self.index_policy,
                         )
-            self._caches[owner] = cache
         try:
             cache.sync(session, owner, state["generation"])
             if cache.restored_generation >= 0:
                 for uid in cache.vectors.active - cache.memories.keys():
                     cache.vectors.remove(uid)
                 cache.restored_generation = -1
+            if cache.registry_generation != state["generation"]:
+                cache.registry = Registry(self.store.fields(session, owner))
+                cache.registry_generation = state["generation"]
         except BaseException:
-            self._caches.pop(owner, None)
+            with self._cache_lock:
+                if self._caches.get(owner) is cache:
+                    self._caches.pop(owner, None)
             raise
-        self._caches.move_to_end(owner)
-        while len(self._caches) > self.max_cached_owners:
-            self._caches.popitem(last=False)
-        return cache, Registry(self.store.fields(session, owner)), state
+        evicted = []
+        with self._cache_lock:
+            self._caches[owner] = cache
+            self._caches.move_to_end(owner)
+            while len(self._caches) > self.max_cached_owners:
+                evicted.append(self._caches.popitem(last=False))
+        return cache, cache.registry, state
 
     async def checkpoint_indexes(self, *, force=False):
         def save():
             if self.index_policy.backend != "hnsw":
                 return 0
             saved = 0
-            with self._lock:
-                for owner, cache in list(self._caches.items()):
+            with self._cache_lock:
+                owners = tuple(self._caches)
+            for owner in owners:
+                with self._owner_lock(owner):
+                    with self._cache_lock:
+                        cache = self._caches.get(owner)
+                    if cache is None:
+                        continue
                     if (
                         not force
                         and cache.vectors.updates
                         < self.index_policy.checkpoint_after_updates
                     ):
                         continue
-                    with self.store.transaction(owner) as session:
+                    with self.store.read_transaction(
+                        owner, embedding_spec=self.spec.model_dump_json()
+                    ) as session:
                         cache, _, state = self._snapshot(session, owner)
                         generation = state["generation"]
                     manifest, graph = cache.vectors.snapshot()
@@ -246,7 +272,12 @@ class MemoryService:
         vector = await self._vector(request.embedding, request.query)
 
         def run():
-            with self._lock, self.store.transaction(owner_id) as session:
+            with (
+                self._owner_lock(owner_id),
+                self.store.read_transaction(
+                    owner_id, embedding_spec=self.spec.model_dump_json()
+                ) as session,
+            ):
                 cache, registry, state = self._snapshot(session, owner_id)
                 if Status.SUPERSEDED in request.statuses:
                     from .history import recall_history
@@ -278,7 +309,12 @@ class MemoryService:
         self, context: TaskContext, *, owner_id: str
     ) -> PreferencesResponse:
         def run():
-            with self._lock, self.store.transaction(owner_id) as session:
+            with (
+                self._owner_lock(owner_id),
+                self.store.read_transaction(
+                    owner_id, embedding_spec=self.spec.model_dump_json()
+                ) as session,
+            ):
                 cache, registry, state = self._snapshot(session, owner_id)
                 return resolve_preferences(
                     cache, registry, state["generation"], context
@@ -292,7 +328,12 @@ class MemoryService:
         vector = await self._vector(request.embedding, request.memory.summary)
 
         def inspect():
-            with self._lock, self.store.transaction(owner_id) as session:
+            with (
+                self._owner_lock(owner_id),
+                self.store.read_transaction(
+                    owner_id, embedding_spec=self.spec.model_dump_json()
+                ) as session,
+            ):
                 cache, registry, state = self._snapshot(session, owner_id)
                 memory = self._normalize(request.memory, registry)
                 if (
@@ -350,7 +391,10 @@ class MemoryService:
                     break
 
         def persist():
-            with self._lock, self.store.transaction(owner_id) as session:
+            with (
+                self._owner_lock(owner_id),
+                self.store.transaction(owner_id) as session,
+            ):
                 cache, _registry, state = self._snapshot(session, owner_id)
                 if state["generation"] != generation:
                     raise ConflictError(
@@ -398,7 +442,12 @@ class MemoryService:
         vector = await self._vector(None, query) if query else None
 
         def run():
-            with self._lock, self.store.transaction(owner_id) as session:
+            with (
+                self._owner_lock(owner_id),
+                self.store.read_transaction(
+                    owner_id, embedding_spec=self.spec.model_dump_json()
+                ) as session,
+            ):
                 cache, registry, state = self._snapshot(session, owner_id)
                 preferences = resolve_preferences(
                     cache, registry, state["generation"], context
@@ -418,13 +467,14 @@ class MemoryService:
                 )
                 receipt = secrets.token_urlsafe(24)
                 # One current receipt per owner/task; bounded retention per service.
-                self._receipts[(owner_id, context.task_id)] = (
-                    receipt,
-                    context.model_dump_json(),
-                    state["generation"],
-                )
-                if len(self._receipts) > 1024:
-                    del self._receipts[next(iter(self._receipts))]
+                with self._cache_lock:
+                    self._receipts[(owner_id, context.task_id)] = (
+                        receipt,
+                        context.model_dump_json(),
+                        state["generation"],
+                    )
+                    if len(self._receipts) > 1024:
+                        del self._receipts[next(iter(self._receipts))]
                 return ContextResponse(
                     preferences=preferences, supporting=supporting, receipt=receipt
                 )
@@ -437,13 +487,22 @@ class MemoryService:
         self, receipt: str, context: TaskContext, *, owner_id: str
     ):
         def run():
-            with self._lock, self.store.transaction(owner_id) as session:
+            with (
+                self._owner_lock(owner_id),
+                self.store.read_transaction(
+                    owner_id, embedding_spec=self.spec.model_dump_json()
+                ) as session,
+            ):
                 expected = (
                     receipt,
                     context.model_dump_json(),
                     self.store.state(session, owner_id)["generation"],
                 )
-                if self._receipts.get((owner_id, context.task_id)) != expected:
+                with self._cache_lock:
+                    matches = (
+                        self._receipts.get((owner_id, context.task_id)) == expected
+                    )
+                if not matches:
                     raise ContextRequiredError(
                         "missing/stale context: prepare_task_context before editing"
                     )

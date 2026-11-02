@@ -19,3 +19,7 @@ class EmbeddingError(MemoryError):
 
 class ContextRequiredError(MemoryError):
     """A task context receipt is missing, stale, or belongs to another task."""
+
+
+class ContextBudgetError(SchemaError):
+    """Mandatory memory context exceeds the caller's explicit budget."""

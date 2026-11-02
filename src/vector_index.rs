@@ -5,11 +5,14 @@ use pyo3::prelude::*;
 use std::collections::HashMap;
 use std::sync::RwLock;
 
-fn normalized(v: Vec<f32>, dim: usize) -> Result<Vec<f32>, String> {
+fn normalized(v: Vec<f32>, dim: usize, allow_zero: bool) -> Result<Vec<f32>, String> {
     if v.len() != dim || v.iter().any(|x| !x.is_finite()) {
         return Err("embedding dimension mismatch or non-finite values".into());
     }
     let norm = v.iter().map(|x| f64::from(*x).powi(2)).sum::<f64>().sqrt();
+    if norm == 0.0 && allow_zero {
+        return Ok(v);
+    }
     if norm == 0.0 {
         return Err("zero embedding is not searchable".into());
     }
@@ -21,23 +24,27 @@ fn normalized(v: Vec<f32>, dim: usize) -> Result<Vec<f32>, String> {
 #[pyclass(frozen, module = "memory_core._native")]
 pub struct PyVectorIndex {
     dim: usize,
+    allow_zero: bool,
     vectors: RwLock<HashMap<String, Vec<f32>>>,
 }
 
 #[pymethods]
 impl PyVectorIndex {
     #[new]
-    fn new(dim: usize) -> PyResult<Self> {
+    #[pyo3(signature = (dim, *, allow_zero=false))]
+    fn new(dim: usize, allow_zero: bool) -> PyResult<Self> {
         if dim == 0 {
             return Err(PyValueError::new_err("dimension must be positive"));
         }
         Ok(Self {
             dim,
+            allow_zero,
             vectors: RwLock::new(HashMap::new()),
         })
     }
     fn upsert(&self, py: Python<'_>, id: String, vector: Vec<f32>) -> PyResult<()> {
-        let vector = normalized(vector, self.dim).map_err(PyValueError::new_err)?;
+        let vector =
+            normalized(vector, self.dim, self.allow_zero).map_err(PyValueError::new_err)?;
         py.detach(|| {
             self.vectors
                 .write()
@@ -62,7 +69,7 @@ impl PyVectorIndex {
         ids: Vec<String>,
         k: usize,
     ) -> PyResult<Vec<(String, f32)>> {
-        let query = normalized(query, self.dim).map_err(PyValueError::new_err)?;
+        let query = normalized(query, self.dim, self.allow_zero).map_err(PyValueError::new_err)?;
         Ok(py.detach(|| {
             let vectors = self.vectors.read().unwrap_or_else(|e| e.into_inner());
             let mut scores: Vec<_> = ids
@@ -87,9 +94,12 @@ mod tests {
     use super::*;
     #[test]
     fn validates_and_normalizes() {
-        assert!(normalized(vec![0.0, 0.0], 2).is_err());
-        assert!(normalized(vec![f32::NAN], 1).is_err());
-        assert!(normalized(vec![1.0], 2).is_err());
-        assert_eq!(normalized(vec![3.0, 4.0], 2).unwrap(), vec![0.6, 0.8]);
+        assert!(normalized(vec![0.0, 0.0], 2, false).is_err());
+        assert!(normalized(vec![f32::NAN], 1, false).is_err());
+        assert!(normalized(vec![1.0], 2, false).is_err());
+        assert_eq!(
+            normalized(vec![3.0, 4.0], 2, false).unwrap(),
+            vec![0.6, 0.8]
+        );
     }
 }

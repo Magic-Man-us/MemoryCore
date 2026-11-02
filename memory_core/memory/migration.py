@@ -30,7 +30,10 @@ async def import_legacy(
     service, *, owner_id: str, include_unscoped_assistant: bool = False
 ):
     def read():
-        with service._lock, service.store.transaction(owner_id) as session:
+        with (
+            service._owner_lock(owner_id),
+            service.store.transaction(owner_id) as session,
+        ):
             rows = []
             for row in session.execute(
                 text("SELECT * FROM ltm_traces WHERE user_id=:o"), {"o": owner_id}
@@ -97,7 +100,10 @@ async def import_legacy(
         prepared.append((source, uid, payload, memory, vector))
 
     def write():
-        with service._lock, service.store.transaction(owner_id) as session:
+        with (
+            service._owner_lock(owner_id),
+            service.store.transaction(owner_id) as session,
+        ):
             _cache, registry, _ = service._snapshot(session, owner_id)
             session.execute(
                 text("""CREATE TABLE IF NOT EXISTS memory_legacy_archive (

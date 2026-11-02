@@ -22,17 +22,30 @@ from .models import (
 
 
 def catalog(service, request, owner):
-    with service._lock, service.store.transaction(owner) as session:
+    transaction = (
+        service.store.transaction(owner)
+        if isinstance(request, RegisterFieldRequest)
+        else service.store.read_transaction(
+            owner, embedding_spec=service.spec.model_dump_json()
+        )
+    )
+    with service._owner_lock(owner), transaction as session:
         cache, registry, state = service._snapshot(session, owner)
         if isinstance(request, DescribeSchemaRequest):
             return SchemaResponse(
                 request_schema=REQUEST_ADAPTER.json_schema(),
                 memory_schema=MEMORY_ADAPTER.json_schema(),
-                fields=list(registry.fields.values()),
+                fields=[
+                    field.model_copy(deep=True) for field in registry.fields.values()
+                ],
                 generation=state["generation"],
             )
         if isinstance(request, ListFieldsRequest):
-            return FieldsResponse(fields=list(registry.fields.values()))
+            return FieldsResponse(
+                fields=[
+                    field.model_copy(deep=True) for field in registry.fields.values()
+                ]
+            )
         if isinstance(request, RegisterFieldRequest):
             field = request.definition
             old = registry.fields.get(field.name)
