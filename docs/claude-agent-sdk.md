@@ -220,3 +220,6 @@ adapter hides `ListValuesRequest.scope` from model-controlled tool inputs and re
 overrides. Global tasks see global values; project tasks see global and same-project
 values. The trusted Python API can request owner-wide discovery with `scope=None`.
 See [security review](security-review.md) for the regression and dependency audit.
+
+For the exact injection points, a provider-neutral chat example, transcript ownership,
+and context/token-budget limits, see [conversation context](conversation-context.md).
