@@ -168,3 +168,6 @@ The database also stores graph snapshots; lossless archival is not disk deletion
 Raw lifecycle reports: [5k](benchmarks/lifecycle-hnsw-5000.json),
 [50k](benchmarks/lifecycle-hnsw-50000.json),
 [100k](benchmarks/lifecycle-hnsw-100000.json).
+
+For decision-level checks, use the [reconciliation evaluation guide](reconciliation-evaluation.md).
+It scores actions, target IDs and revisions independently of retrieval metrics.
