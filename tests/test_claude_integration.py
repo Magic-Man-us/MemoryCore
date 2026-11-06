@@ -563,7 +563,9 @@ async def test_overall_timeout_disconnects_and_frees_capacity(memory):
     agent = ClaudeMemoryAgent(
         memory,
         client_factory=factory,
-        policy=ClaudeMemoryPolicy(run_timeout_seconds=0.1),
+        # The budget also covers task start and context preparation; it must leave
+        # room for those on a slow runner so the timeout fires inside the client.
+        policy=ClaudeMemoryPolicy(run_timeout_seconds=1.0),
     )
     with pytest.raises(TimeoutError):
         await run(agent)
