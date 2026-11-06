@@ -24,8 +24,12 @@ def resolve_preferences(cache, registry, generation, context):
     for key, memories in sorted(groups.items()):
         # Explicit project exceptions override global rules. Within a scope,
         # ambiguity is surfaced rather than settled by similarity or recency.
+        # A flagged dispute keeps both sides visible, whatever their provenance.
         explicit = [m for m in memories if m.explicit]
-        memories = explicit or memories
+        if explicit:
+            memories = explicit + [
+                m for m in memories if not m.explicit and m.status == Status.DISPUTED
+            ]
         project = [m for m in memories if isinstance(m.scope, ProjectScope)]
         relevant = project or memories
         signatures = {json.dumps(m.value, sort_keys=True) for m in relevant}

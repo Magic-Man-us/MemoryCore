@@ -554,7 +554,8 @@ async def test_dream_cursor_visits_records_with_equal_generations(service):
 
 
 async def test_dream_generated_replacement_and_failure_rollback(service):
-    await remember(service, preference(id="source"))
+    # Dreams may rewrite inferred rules; explicit ones are guarded separately.
+    await remember(service, preference(id="source", explicit=False))
 
     async def planner(groups):
         return {
@@ -643,7 +644,8 @@ async def test_boolean_and_numeric_preference_values_are_not_duplicates(service)
 
 
 async def test_dream_multi_change_failure_rolls_back_earlier_change(service):
-    await remember(service, preference(id="source"))
+    # Dreams may rewrite inferred rules; explicit ones are guarded separately.
+    await remember(service, preference(id="source", explicit=False))
 
     async def planner(groups):
         return {
@@ -874,3 +876,36 @@ async def test_inferred_preference_cannot_supersede_explicit(service):
         expected_generation=first.generation,
     )
     assert flagged.memory.explicit is False
+    resolved = await service.resolve_prefs(
+        TaskContext(task_id="x", attributes={"languages": ["python"]}),
+        owner_id="alice",
+    )
+    assert not resolved.effective
+    (conflict,) = resolved.conflicts
+    assert sorted(m.value for m in conflict.memories) == ["pip", "uv"]
+
+
+async def test_dream_replacement_cannot_supersede_explicit_preference(service):
+    from memory_core.memory.models import DreamChange, DreamProposal
+
+    first = await remember(service, preference())
+
+    async def planner(groups):
+        return DreamProposal(
+            changes=[
+                DreamChange(
+                    memory=preference(value="pip"),
+                    decision=Supersede(target_id=first.memory.id, expected_revision=1),
+                )
+            ]
+        )
+
+    service.dream_planner = planner
+    plan = await service.dream(owner_id="alice")
+    with pytest.raises(SchemaError, match="inferred preference cannot supersede"):
+        await service.apply_dream(plan.plan.id, owner_id="alice")
+    resolved = await service.resolve_prefs(
+        TaskContext(task_id="x", attributes={"languages": ["python"]}),
+        owner_id="alice",
+    )
+    assert [m.value for m in resolved.effective] == ["uv"]
