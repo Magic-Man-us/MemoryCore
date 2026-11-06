@@ -839,3 +839,38 @@ async def test_dream_finds_exact_duplicates_without_semantic_hits(service):
     assert len(result.effective) == 1
     assert result.effective[0].source_refs == ["one", "two"]
     assert result.effective[0].updated_at > second.memory.updated_at
+
+
+async def test_tool_callers_cannot_assert_explicit_preferences(service):
+    from memory_core.runtime.tools import MemoryTools
+
+    tools = MemoryTools(service, owner_id="alice")
+    result = await tools.invoke(
+        {
+            "operation": "remember",
+            "embedding": V,
+            "memory": preference().model_dump(mode="json"),
+        }
+    )
+    assert result["memory"]["explicit"] is False
+    # Host code calling the service directly keeps trusted provenance.
+    direct = await remember(service, preference(value="pip", preference_key="other"))
+    assert direct.memory.explicit is True
+
+
+async def test_inferred_preference_cannot_supersede_explicit(service):
+    first = await remember(service, preference())
+    with pytest.raises(SchemaError, match="inferred preference cannot supersede"):
+        await remember(
+            service,
+            preference(value="pip", explicit=False),
+            decision=Supersede(target_id=first.memory.id, expected_revision=1),
+            expected_generation=first.generation,
+        )
+    flagged = await remember(
+        service,
+        preference(value="pip", explicit=False),
+        decision=FlagConflict(target_id=first.memory.id, expected_revision=1),
+        expected_generation=first.generation,
+    )
+    assert flagged.memory.explicit is False
