@@ -342,3 +342,63 @@ async def test_late_approval_does_not_rewind_completed_scan(tmp_path):
         assert not await memory.worker.run_once()
     finally:
         memory.service.store.db.engine.dispose()
+
+
+async def test_applied_dream_replacements_do_not_count_as_writes(tmp_path):
+    """Regression: dream output must not re-trigger dreams (requeue loop)."""
+    from memory_core.runtime.models import ReviewJobRequest
+
+    async def planner(groups):
+        return DreamProposal(
+            changes=[
+                DreamChange(
+                    memory=ObservationMemory(
+                        summary=f"Replacement {g.memory.id}",
+                        observation=f"Replacement {g.memory.id}",
+                    ),
+                    decision=Supersede(
+                        target_id=g.memory.id, expected_revision=g.memory.revision
+                    ),
+                )
+                for g in groups
+            ]
+        )
+
+    memory = runtime(tmp_path / "requeue.db", planner)
+    try:
+        await write(memory, 0, 100)
+        await drain(memory)
+        with memory.queue.transaction("alice") as session:
+            before = memory.service.store.state(session, "alice")["writes"]
+            jobs = (
+                session.execute(
+                    text("SELECT id FROM memory_jobs WHERE status='proposed'")
+                )
+                .scalars()
+                .all()
+            )
+        assert jobs
+        for job in jobs:
+            await memory.call(
+                ReviewJobRequest(job_id=job, accept=True), owner_id="alice"
+            )
+        await drain(memory)
+        with memory.queue.transaction("alice") as session:
+            state = memory.service.store.state(session, "alice")
+            assert state["writes"] == before
+            superseded = session.execute(
+                text(
+                    "SELECT COUNT(*) FROM memories_v1 "
+                    "WHERE json_extract(payload,'$.status')='superseded'"
+                )
+            ).scalar()
+            assert superseded > 0
+            pending = session.execute(
+                text(
+                    "SELECT COUNT(*) FROM memory_jobs "
+                    "WHERE kind='dream' AND status IN ('pending','running')"
+                )
+            ).scalar()
+            assert pending == 0
+    finally:
+        memory.service.store.db.engine.dispose()

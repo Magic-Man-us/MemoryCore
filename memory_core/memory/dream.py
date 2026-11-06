@@ -322,6 +322,7 @@ async def apply(service, owner, plan_id, *, on_commit=None, _advance_cursor=True
                             vector,
                             decision,
                             allowed,
+                            write=False,
                         )
                 applied = result.model_copy(update={"applied": True})
                 session.execute(
