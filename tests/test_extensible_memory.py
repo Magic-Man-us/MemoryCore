@@ -639,7 +639,7 @@ async def test_local_embedder_never_downloads_or_executes_remote_code(
             seen.update(options)
             assert path == str(tmp_path)
 
-        def get_sentence_embedding_dimension(self):
+        def get_embedding_dimension(self):
             return 2
 
         def encode(self, texts, **options):

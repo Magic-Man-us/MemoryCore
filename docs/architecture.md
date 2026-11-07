@@ -72,7 +72,8 @@ weighted nonnegative cosine similarity and query-token coverage. `RetrievalPolic
 weights, candidate budgets, and a minimum score. The defaults are 0.7 semantic and 0.3 lexical.
 Ties break by ID. This is token-overlap ranking, not BM25 or an LLM reranker.
 
-There is no ANN or k-means dependency. Measure exact-search latency and recall first;
+The default `exact` backend has no ANN dependency; the experimental `hnsw` backend is described in
+[indexed-memory.md](indexed-memory.md). Measure exact-search latency and recall first;
 `benchmarks/memory_scale.py` measures end-to-end mechanics. `evaluate_retrieval` measures
 recall@k, precision@k, reciprocal rank, and latency against labeled query cases. It does
 not automatically promote a candidate configuration.

@@ -44,6 +44,10 @@ jobs:
 
   python:
     runs-on: ubuntu-latest
+    env:
+      # hnswlib builds with -march=native by default; a cached wheel built on one
+      # runner's CPU can crash with SIGILL on another.
+      HNSWLIB_NO_NATIVE: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -58,6 +62,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: ${{ matrix.python-version }}
+          cache-suffix: portable-hnswlib
 
       - name: Install
         run: |

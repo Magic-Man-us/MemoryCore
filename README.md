@@ -132,19 +132,22 @@ checks, including when multiple service instances share the database.
 ## Measured performance
 
 A local synthetic run with **50,000 records and 384-dimensional vectors**, using 30 warm
-queries, measured approximately:
+queries and a release build, measured approximately:
 
 | Operation | Median | p95 |
 |---|---:|---:|
-| Unfiltered recall | 152 ms | 202 ms |
-| Recall filtered to about 500 records | 12 ms | 16 ms |
+| Unfiltered recall | 30 ms | 31 ms |
+| Recall filtered to about 500 records | 3.2 ms | 4.3 ms |
 
-Cold recall including hydration took 9.2 seconds. Process peak RSS was about 371 MiB,
-including fixture construction. Each query returned at most five memories; all 12 matching
-preference rules were returned independently of top-k.
+Cold recall including hydration took 1.5 seconds. Process peak RSS was about 300 MiB,
+including fixture construction. Recall ran on one worker thread, with worker CPU time
+equal to wall time. Each query returned at most five memories; all 12 matching preference
+rules were returned independently of top-k.
 
-These are measurements from one container, not latency guarantees or a semantic-quality
-benchmark. Reproduce with `uv run python benchmarks/memory_scale.py`. Compare retrieval
+These are measurements from one machine, not latency guarantees or a semantic-quality
+benchmark. Reproduce with `uv run python benchmarks/memory_scale.py` against a release build
+(`maturin develop --release`); a debug build measured 240 ms unfiltered. `--profile PATH`
+adds a cProfile pass and reports the hottest functions. Compare retrieval
 configurations using `memory_core.memory.evaluation.evaluate_retrieval` and your own labeled
 queries before changing models or adding approximate search.
 
