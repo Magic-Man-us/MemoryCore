@@ -40,8 +40,13 @@ def equivalent(a, b):
 
 
 def apply_reconciliation(
-    service, session, owner, cache, memory, vector, decision, allowed
+    service, session, owner, cache, memory, vector, decision, allowed, *, write=True
 ):
+    """Apply one reconciliation decision.
+
+    ``write=False`` for maintenance (dream) applies: they must not count toward
+    ``dream_after_writes``, or consolidation output schedules more consolidation.
+    """
     if service.store.contains(session, owner, memory.id):
         raise ConflictError("new memory id already exists")
     target = None
@@ -97,6 +102,7 @@ def apply_reconciliation(
             "target_id": getattr(decision, "target_id", None),
             "sources": memory.source_refs,
         },
+        write=write,
     )
     now = datetime.now(UTC)
     if isinstance(decision, AttachEvidence):
