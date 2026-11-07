@@ -25,7 +25,9 @@ class LocalSentenceEmbedder:
         if batch_size < 1:
             raise ValueError("batch_size must be positive")
         # Optional import: the core engine has no ML runtime dependency.
-        from sentence_transformers import SentenceTransformer  # pyright: ignore[reportMissingImports]
+        from sentence_transformers import (  # pyright: ignore[reportMissingImports]
+            SentenceTransformer,
+        )
 
         self._model = SentenceTransformer(
             str(path), local_files_only=True, trust_remote_code=False, device="cpu"

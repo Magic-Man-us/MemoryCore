@@ -9,7 +9,7 @@ import threading
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, overload
 from weakref import WeakValueDictionary
 
 from pydantic import BaseModel, JsonValue
@@ -59,7 +59,17 @@ if TYPE_CHECKING:
     from sqlalchemy.engine import RowMapping
     from sqlalchemy.orm import Session
 
-    from .models import Memory
+    from .models import (
+        DescribeSchemaRequest,
+        FieldResponse,
+        FieldsResponse,
+        ListFieldsRequest,
+        ListValuesRequest,
+        Memory,
+        RegisterFieldRequest,
+        SchemaResponse,
+        ValuesResponse,
+    )
 
 
 class MemoryService:
@@ -74,7 +84,7 @@ class MemoryService:
         dream_after_writes: int = 100,
         retrieval_policy: RetrievalPolicy | None = None,
         max_cached_owners: int = 16,
-        index_policy: IndexPolicy | None = None,
+        index_policy: IndexPolicy | dict[str, JsonValue] | None = None,
     ) -> None:
         if dream_after_writes < 1:
             raise ValueError("dream_after_writes must be positive")
@@ -240,6 +250,46 @@ class MemoryService:
         norm = math.hypot(*vector)
         return [v / norm for v in vector]
 
+    @overload
+    async def call(
+        self, request: RememberRequest, *, owner_id: str
+    ) -> RememberResponse: ...
+    @overload
+    async def call(
+        self, request: RecallRequest, *, owner_id: str
+    ) -> RecallResponse: ...
+    @overload
+    async def call(
+        self, request: ResolvePreferencesRequest, *, owner_id: str
+    ) -> PreferencesResponse: ...
+    @overload
+    async def call(
+        self, request: PrepareContextRequest, *, owner_id: str
+    ) -> ContextResponse: ...
+    @overload
+    async def call(
+        self, request: DescribeSchemaRequest, *, owner_id: str
+    ) -> SchemaResponse: ...
+    @overload
+    async def call(
+        self, request: ListFieldsRequest, *, owner_id: str
+    ) -> FieldsResponse: ...
+    @overload
+    async def call(
+        self, request: RegisterFieldRequest, *, owner_id: str
+    ) -> FieldResponse: ...
+    @overload
+    async def call(
+        self, request: ListValuesRequest, *, owner_id: str
+    ) -> ValuesResponse: ...
+    @overload
+    async def call(
+        self, request: DreamPlanRequest | DreamApplyRequest, *, owner_id: str
+    ) -> DreamResponse: ...
+    @overload
+    async def call(
+        self, request: dict[str, JsonValue], *, owner_id: str
+    ) -> Response: ...
     async def call(
         self, request: Request | dict[str, JsonValue], *, owner_id: str
     ) -> Response:
