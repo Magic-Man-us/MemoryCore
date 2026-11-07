@@ -6,6 +6,7 @@ snapshot after one-time owner initialization.
 
 from __future__ import annotations
 
+import zlib
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
@@ -14,7 +15,7 @@ from sqlalchemy import text
 from memory_core.storage.codec import JSON_VALUE
 
 from .metadata import DEFAULT_FIELDS
-from .models import FieldDefinition
+from .models import DreamPlan, FieldDefinition
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -51,6 +52,9 @@ DDL = (
     """CREATE TABLE IF NOT EXISTS memory_audit (
        seq INTEGER PRIMARY KEY AUTOINCREMENT, owner TEXT NOT NULL,
        generation INTEGER NOT NULL, action TEXT NOT NULL, detail TEXT NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS memory_forgotten (
+       owner TEXT NOT NULL, id TEXT NOT NULL, generation INTEGER NOT NULL,
+       PRIMARY KEY(owner,id))""",
     """CREATE TABLE IF NOT EXISTS memory_dreams (
        owner TEXT NOT NULL, id TEXT NOT NULL, payload TEXT NOT NULL,
        PRIMARY KEY(owner,id))""",
@@ -166,6 +170,42 @@ class Store:
         )
         return generation
 
+    def forget(self, session: Session, owner: str, memory_id: str) -> bool:
+        """Delete every stored copy of a record. Other caches drop it on their next sync."""
+        if not self.contains(session, owner, memory_id):
+            return False
+        generation = self.bump(session, owner, "forget", {"id": memory_id}, write=False)
+        params = {"o": owner, "id": memory_id}
+        session.execute(
+            text("DELETE FROM memories_v1 WHERE owner=:o AND id=:id"), params
+        )
+        session.execute(
+            text("DELETE FROM memory_archives WHERE owner=:o AND id=:id"), params
+        )
+        # Dream plans embed copies of the memories they group.
+        for table, compressed in (
+            ("memory_dreams", False),
+            ("memory_dream_archives", True),
+        ):
+            for plan_id, payload in session.execute(
+                text(f"SELECT id,payload FROM {table} WHERE owner=:o"), {"o": owner}
+            ).all():
+                raw = zlib.decompress(payload) if compressed else payload
+                if _embeds(DreamPlan.model_validate_json(raw), memory_id):
+                    session.execute(
+                        text(f"DELETE FROM {table} WHERE owner=:o AND id=:id"),
+                        {"o": owner, "id": plan_id},
+                    )
+        # A saved HNSW graph holds the record's vector; it is rebuilt on next load.
+        session.execute(
+            text("DELETE FROM memory_vector_snapshots WHERE owner=:o"), {"o": owner}
+        )
+        session.execute(
+            text("INSERT OR REPLACE INTO memory_forgotten VALUES (:o,:id,:g)"),
+            {**params, "g": generation},
+        )
+        return True
+
     @staticmethod
     def contains(session: Session, owner: str, memory_id: str) -> bool:
         return (
@@ -198,3 +238,11 @@ class Store:
                 "e": embedding,
             },
         )
+
+
+def _embeds(plan: DreamPlan, memory_id: str) -> bool:
+    return any(
+        group.memory.id == memory_id
+        or any(hit.memory.id == memory_id for hit in group.neighbors)
+        for group in plan.groups
+    ) or any(change.memory.id == memory_id for change in plan.proposal.changes)

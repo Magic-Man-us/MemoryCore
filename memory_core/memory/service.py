@@ -207,6 +207,14 @@ class MemoryService:
                         continue
                     manifest, graph = vectors.snapshot()
                     with self.store.transaction(owner) as session:
+                        # Saving a graph read before a forget would restore the record.
+                        if session.execute(
+                            text(
+                                "SELECT 1 FROM memory_forgotten WHERE owner=:o AND generation>:g"
+                            ),
+                            {"o": owner, "g": generation},
+                        ).first():
+                            continue
                         session.execute(
                             text("""INSERT INTO memory_vector_snapshots VALUES (:o,:i,:g,:m,:b)
                             ON CONFLICT(owner) DO UPDATE SET identity=excluded.identity,generation=excluded.generation,
@@ -376,6 +384,18 @@ class MemoryService:
                     )
                 ]
                 return RecallResponse(hits=hits, generation=state["generation"])
+
+        return await asyncio.to_thread(run)
+
+    async def forget(self, memory_id: str, *, owner_id: str) -> bool:
+        """Hard-delete a record and every stored copy. Host-only; not a tool operation."""
+
+        def run() -> bool:
+            with (
+                self._owner_lock(owner_id),
+                self.store.transaction(owner_id) as session,
+            ):
+                return self.store.forget(session, owner_id, memory_id)
 
         return await asyncio.to_thread(run)
 
