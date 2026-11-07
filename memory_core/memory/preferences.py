@@ -3,18 +3,33 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from typing import TYPE_CHECKING
 
 from memory_core.storage.codec import canonical_json
 
 from .models import (
     PreferenceConflict,
+    PreferenceMemory,
     PreferencesResponse,
     ProjectScope,
     Status,
 )
 
+if TYPE_CHECKING:
+    from datetime import datetime
 
-def resolve_preferences(cache, registry, generation, context, at):
+    from .cache import OwnerCache
+    from .metadata import Registry
+    from .models import TaskContext
+
+
+def resolve_preferences(
+    cache: OwnerCache,
+    registry: Registry,
+    generation: int,
+    context: TaskContext,
+    at: datetime,
+) -> PreferencesResponse:
     attributes = registry.normalize(context.attributes)
     groups = defaultdict(list)
     ids = cache.matching_preferences(
@@ -22,6 +37,7 @@ def resolve_preferences(cache, registry, generation, context, at):
     ) - cache.outside_window(at)
     for uid in sorted(ids):
         memory = cache.memories[uid]
+        assert isinstance(memory, PreferenceMemory)
         groups[memory.preference_key].append(memory)
     effective, conflicts = [], []
     for key, memories in sorted(groups.items()):

@@ -1,5 +1,7 @@
 """Explicit failures at the memory boundary."""
 
+from __future__ import annotations
+
 
 class MemoryError(Exception):
     """Base memory service failure."""

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import zlib
+from collections.abc import Callable
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from sqlalchemy import text
 
@@ -17,16 +19,34 @@ from .models import (
     DreamChange,
     DreamGroup,
     DreamPlan,
+    DreamPlanRequest,
     DreamProposal,
     DreamResponse,
     MemoryHit,
     PreferenceMemory,
     Status,
 )
+from .payloads import Payloads
 from .reconciliation import apply_reconciliation, equivalent
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
-def due(service, owner):
+    from sqlalchemy.engine import Row
+    from sqlalchemy.orm import Session
+
+    from .cache import OwnerCache
+    from .service import MemoryService
+
+
+class DreamScan(TypedDict):
+    cursor: int
+    cursor_id: str
+    end: int
+    writes: int
+
+
+def due(service: MemoryService, owner: str) -> bool:
     with (
         service._owner_lock(owner),
         service.store.read_transaction(
@@ -37,8 +57,15 @@ def due(service, owner):
         return state["writes"] - state["dream_writes"] >= service.dream_after_writes
 
 
-async def plan(service, owner, request, *, scan=None):
-    def snapshot():
+async def plan(
+    service: MemoryService,
+    owner: str,
+    request: DreamPlanRequest,
+    *,
+    scan: DreamScan | None = None,
+) -> DreamResponse:
+    # Any: SQLAlchemy Row cells and the owner state mapping are untyped.
+    def snapshot() -> tuple[Sequence[Row[Any]], dict[str, Any], OwnerCache]:
         with (
             service._owner_lock(owner),
             service.store.read_transaction(
@@ -72,14 +99,15 @@ async def plan(service, owner, request, *, scan=None):
 
     rows, state, cache = await asyncio.to_thread(snapshot)
 
-    def group_for(uid, raw):
+    def group_for(uid: str, raw: bytes | None) -> DreamGroup | None:
         with (
             service._owner_lock(owner),
             service.store.read_transaction(
                 owner, embedding_spec=service.spec.model_dump_json()
             ) as read_session,
         ):
-            cache.memories.bind(read_session, owner)
+            if isinstance(cache.memories, Payloads):
+                cache.memories.bind(read_session, owner)
             current = service.store.state(read_session, owner)
             if (
                 cache.generation != state["generation"]
@@ -90,9 +118,10 @@ async def plan(service, owner, request, *, scan=None):
             if memory is None or memory.status != Status.ACTIVE or not raw:
                 return None
             ids = cache.eligible(memory.scope.project_id) - {uid}
+            # decode_embedding is None only for a corrupt cell; raw is nonempty here.
             hits = cache.search(
                 memory.summary,
-                decode_embedding(raw),
+                decode_embedding(raw),  # pyright: ignore[reportArgumentType]
                 ids,
                 request.neighbors_per_memory,
             )
@@ -157,7 +186,7 @@ async def plan(service, owner, request, *, scan=None):
         proposal=proposal,
     )
 
-    def save():
+    def save() -> DreamResponse:
         with service._owner_lock(owner), service.store.transaction(owner) as session:
             current = service.store.state(session, owner)
             if current["generation"] != result.generation:
@@ -177,8 +206,15 @@ async def plan(service, owner, request, *, scan=None):
     return await asyncio.to_thread(save)
 
 
-async def apply(service, owner, plan_id, *, on_commit=None, _advance_cursor=True):
-    def load():
+async def apply(
+    service: MemoryService,
+    owner: str,
+    plan_id: str,
+    *,
+    on_commit: Callable[[Session, DreamResponse], None] | None = None,
+    _advance_cursor: bool = True,
+) -> DreamResponse:
+    def load() -> DreamPlan:
         with (
             service._owner_lock(owner),
             service.store.read_transaction(
@@ -216,7 +252,7 @@ async def apply(service, owner, plan_id, *, on_commit=None, _advance_cursor=True
         else:
             vectors.append(await service._vector(None, change.memory.summary))
 
-    def commit():
+    def commit() -> DreamResponse:
         try:
             with (
                 service._owner_lock(owner),

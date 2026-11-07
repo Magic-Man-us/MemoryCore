@@ -1,5 +1,7 @@
 """Injectable local reasoning steps. The engine validates every returned decision."""
 
+from __future__ import annotations
+
 from typing import Protocol
 
 from .models import DreamGroup, DreamProposal, Memory, MemoryHit, Reconciliation

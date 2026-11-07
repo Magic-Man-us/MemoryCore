@@ -8,10 +8,14 @@ from __future__ import annotations
 
 import statistics
 import time
+from typing import TYPE_CHECKING
 
 from pydantic import Field
 
 from .models import Model, RecallRequest
+
+if TYPE_CHECKING:
+    from .service import MemoryService
 
 
 class RetrievalCase(Model):
@@ -32,7 +36,7 @@ class RetrievalEvaluation(Model):
 
 
 async def evaluate_retrieval(
-    service, cases: list[RetrievalCase], *, owner_id: str, k: int = 10
+    service: MemoryService, cases: list[RetrievalCase], *, owner_id: str, k: int = 10
 ) -> RetrievalEvaluation:
     if not cases:
         raise ValueError("evaluation requires held-out query cases")

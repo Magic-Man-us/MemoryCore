@@ -13,9 +13,11 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 if TYPE_CHECKING:
+    import sqlite3
     from collections.abc import Iterator
 
     from sqlalchemy.engine import Engine
+    from sqlalchemy.pool import ConnectionPoolEntry
 
 SQLITE_MEMORY = ":memory:"
 BUSY_TIMEOUT_SECONDS = 30
@@ -81,7 +83,9 @@ class Database:
         return self._serial_lock if self._serial_lock is not None else nullcontext()
 
 
-def _sqlite_wal_pragma(dbapi_connection: Any, _record: Any) -> None:
+def _sqlite_wal_pragma(
+    dbapi_connection: sqlite3.Connection, _record: ConnectionPoolEntry
+) -> None:
     cursor = dbapi_connection.cursor()
     try:
         cursor.execute("PRAGMA journal_mode=WAL")

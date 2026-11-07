@@ -18,7 +18,7 @@ class LocalSentenceEmbedder:
         revision: str,
         dimensions: int,
         batch_size: int = 32,
-    ):
+    ) -> None:
         path = Path(model_path).expanduser().resolve()
         if not path.is_dir():
             raise ValueError("model_path must be an existing local model directory")
@@ -42,7 +42,7 @@ class LocalSentenceEmbedder:
         self._lock = threading.Lock()
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
-        def run():
+        def run() -> list[list[float]]:
             with self._lock:
                 return self._model.encode(
                     texts,
