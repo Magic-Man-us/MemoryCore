@@ -11,6 +11,8 @@ from sqlalchemy import text
 from memory_core.memory.errors import ConflictError, ContextRequiredError, SchemaError
 from memory_core.memory.metadata import Registry
 from memory_core.memory.models import DescribeSchemaRequest, SchemaResponse, TaskContext
+from memory_core.memory.service import MemoryService
+from memory_core.storage import Database
 
 from .knowledge import is_current
 from .models import (
@@ -432,17 +434,15 @@ class MemoryCore:
         **kwargs,
     ):
         """Create a local runtime with optional reasoning/research providers."""
-        from memory_core.config import build_memory_system
-
-        service = build_memory_system(
-            sqlite_path=path,
+        service = MemoryService(
+            Database(path),
             embedding_spec=embedding_spec,
             embedder=embedder,
             reconciler=reconciler,
             dream_planner=dream_planner,
             max_cached_owners=max_cached_owners,
             index_policy=index_policy,
-        ).service
+        )
         return cls(service, **kwargs)
 
     async def _prepare_task(self, request, owner, *, cached=None):

@@ -20,7 +20,6 @@ classifiers = [
 ]
 dependencies = [
     "pydantic>=2.12.4",
-    "pydantic-settings>=2.14.2",
     "sqlalchemy>=2.0.44",
 ]
 
@@ -33,9 +32,6 @@ dev = [
 ]
 local = [
     "sentence-transformers>=5,<6",
-]
-postgres = [
-    "psycopg[binary]>=3.2.0",
 ]
 ai = [
     "pydantic-ai>=1.102.0",
@@ -59,10 +55,6 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
 [tool.ruff.lint.flake8-type-checking]
-# Pydantic and SQLAlchemy evaluate annotations at runtime; never let the TC rules
-# move their imports behind TYPE_CHECKING (see docs/review-junovera-integration.md).
-runtime-evaluated-base-classes = [
-    "pydantic.BaseModel",
-    "pydantic_settings.BaseSettings",
-    "sqlalchemy.orm.DeclarativeBase",
-]
+# Pydantic evaluates annotations at runtime; never let the TC rules move their
+# imports behind TYPE_CHECKING.
+runtime-evaluated-base-classes = ["pydantic.BaseModel"]

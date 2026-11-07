@@ -1,18 +1,5 @@
-"""Storage layer: one SQL database (SQLite by default) behind LTM, STM, working memory,
-and the assistant trace store."""
+"""Storage layer: the one SQLite database behind every store."""
 
-from .database import Base, Database
-from .ltm_store import LongTermStore
-from .settings import DatabaseSettings, sqlite_url
-from .stm_store import ShortTermStore
-from .working_mem import SqlWorkingMemory
+from .database import Database
 
-__all__ = [
-    "Base",
-    "Database",
-    "DatabaseSettings",
-    "LongTermStore",
-    "ShortTermStore",
-    "SqlWorkingMemory",
-    "sqlite_url",
-]
+__all__ = ["Database"]

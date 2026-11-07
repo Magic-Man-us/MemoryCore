@@ -27,15 +27,15 @@ For real semantic retrieval, use a real embedding model consistently for writes 
 
 ```python
 import asyncio
-from memory_core import EmbeddingSpec, build_memory_system
+from memory_core import Database, EmbeddingSpec, MemoryService
 from memory_core.memory.models import PreferenceMemory, RememberRequest, TaskContext
 
 async def main():
-    system = build_memory_system(
-        sqlite_path="./memory.db",
+    memory = MemoryService(
+        Database("./memory.db"),
         embedding_spec=EmbeddingSpec(model_id="example-only", revision="1", dimensions=3),
     )
-    await system.call(
+    await memory.call(
         RememberRequest(
             memory=PreferenceMemory(
                 summary="Use uv for Python dependencies.",
@@ -49,7 +49,7 @@ async def main():
         ),
         owner_id="alice",  # Taken from trusted application context, never model arguments.
     )
-    preferences = await system.resolve_prefs(
+    preferences = await memory.resolve_prefs(
         TaskContext(task_id="edit-api", attributes={"languages": ["python"]}),
         owner_id="alice",
     )
@@ -113,7 +113,7 @@ uv pip install -e ".[local]"
 
 `LocalSentenceEmbedder` in `memory_core.memory.embedding` loads an **existing local model
 directory**, with downloads and remote model code disabled. Supply its `.spec` as
-`embedding_spec` and the instance as `embedder` to `build_memory_system`.
+`embedding_spec` and the instance as `embedder` to `MemoryService` or `MemoryCore.local`.
 The optional model runtime and model weights are not bundled. The core tests use deterministic
 vectors and do not validate a particular pretrained model's semantic quality.
 
@@ -121,21 +121,12 @@ Embedding model ID, revision, and dimensions are persisted per owner. Switching 
 incompatible identity fails even when dimensions match. Re-embedding requires an explicit
 migration into a separately evaluated database; it is not an automatic dream action.
 
-## Storage and compatibility
+## Storage
 
-SQLite is the supported backend for the new typed service. `sqlite_path=":memory:"` gives
-an ephemeral database; a file persists across restarts. Queries automatically hydrate
-changed records into per-owner indexes. Writes use SQLite transactions and generation/revision
+SQLite is the only backend. `Database(":memory:")` gives an ephemeral database; a file
+path persists across restarts. Queries automatically hydrate changed records into per-owner
+indexes. Writes use SQLite transactions and generation/revision
 checks, including when multiple service instances share the database.
-
-Version 0.4 removes the SMK assistant API and its fixed enums. **Existing tables are retained**;
-use the [migration guide](docs/migration-0.4.md) to import them. Unscoped historical assistant
-records require an explicit owner assignment. Imported records retain an archival copy of
-their complete original payload.
-
-The existing user `remember`/`recall`/`hydrate` API, working memory, and short-term stores
-remain available; see [legacy user API](docs/legacy-user-api.md). That API still supports
-optional PostgreSQL. Its records are separate from the typed store until explicitly imported.
 
 ## Measured performance
 

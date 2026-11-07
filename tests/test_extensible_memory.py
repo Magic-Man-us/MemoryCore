@@ -1,14 +1,13 @@
 """Behavior tests for the extensible local memory service and automatic context hook."""
 
 import asyncio
-import json
 
 import pytest
-from memory_core._native import PyMemoryEngine, PyVectorIndex
+from memory_core._native import PyVectorIndex
 from pydantic import ValidationError
 from sqlalchemy import text
 
-from memory_core import EmbeddingSpec, build_memory_system
+from memory_core import Database, EmbeddingSpec, MemoryService
 from memory_core.memory.errors import (
     ConflictError,
     ContextRequiredError,
@@ -58,11 +57,9 @@ class LocalEmbedder:
 
 @pytest.fixture
 def service(tmp_path):
-    return build_memory_system(
-        sqlite_path=tmp_path / "memory.db",
-        embedding_spec=SPEC,
-        embedder=LocalEmbedder(),
-    ).service
+    return MemoryService(
+        Database(tmp_path / "memory.db"), embedding_spec=SPEC, embedder=LocalEmbedder()
+    )
 
 
 def preference(**overrides):
@@ -411,63 +408,6 @@ async def test_dream_failure_keeps_successful_write_explicit(service):
     assert result.maintenance_error == "RuntimeError"
     assert len((await recall(service)).hits) == 1
     assert await service.dream_due("alice")
-
-
-async def test_legacy_migration_preserves_data_without_guessing_ownership(service):
-    from memory_core.memory.migration import import_legacy
-
-    db = service.store.db
-    payload = {
-        "trace_uid": "old",
-        "context_topic": 99,
-        "context_activity": "coding",
-        "summary": "old lesson",
-        "rationale": "why",
-        "tools": [32],
-        "languages": ["python"],
-        "extra": {"custom": "keep"},
-    }
-    with db.session_scope() as session:
-        session.execute(
-            text(
-                "INSERT INTO assistant_traces(trace_uid,created_at,payload,embedding) VALUES (:id,:date,:p,:e)"
-            ),
-            {
-                "id": "old",
-                "date": "2026-01-01",
-                "p": json.dumps(payload),
-                "e": json.dumps(V).encode(),
-            },
-        )
-        session.commit()
-    assert await import_legacy(service, owner_id="alice") == 0
-    assert (
-        await import_legacy(service, owner_id="alice", include_unscoped_assistant=True)
-        == 1
-    )
-    assert (
-        await import_legacy(service, owner_id="alice", include_unscoped_assistant=True)
-        == 0
-    )
-    hit = (await recall(service)).hits[0].memory
-    assert hit.metadata["topics"] == ["legacy_topic_99"]
-    with db.session_scope() as session:
-        archived = session.execute(
-            text("SELECT payload FROM memory_legacy_archive")
-        ).scalar_one()
-        assert json.loads(archived) == payload
-    assert not (await recall(service, "bob")).hits
-
-
-def test_semantic_match_survives_keyword_flood():
-    engine = PyMemoryEngine()
-    for i in range(20):
-        engine.ingest_trace(
-            str(i), "alice", "python dependencies", 0.5, 1, 0, [], [0.0, 1.0]
-        )
-    engine.ingest_trace("best", "alice", "Use uv", 0.5, 1, 0, [], V)
-    hits = engine.search_candidates("alice", "python dependencies", [], 5, V)
-    assert hits[0].trace_uid == "best"
 
 
 def test_generic_native_index_validation_and_selected_ids():

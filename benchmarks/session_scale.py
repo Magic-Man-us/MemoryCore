@@ -25,7 +25,7 @@ from memory_core.memory.models import (
     TaskContext,
 )
 from memory_core.memory.service import MemoryService
-from memory_core.storage import Database, DatabaseSettings
+from memory_core.storage import Database
 from memory_core.storage.codec import encode_embedding
 
 PositiveCount = Annotated[int, Field(gt=0)]
@@ -194,7 +194,7 @@ def make_service(
     *, sqlite_path: Path, embedding_spec: EmbeddingSpec, max_cached_owners: int = 16
 ) -> MemoryService:
     return MemoryService(
-        Database(settings=DatabaseSettings(sqlite_path=str(sqlite_path))),
+        Database(sqlite_path),
         embedding_spec=embedding_spec,
         max_cached_owners=max_cached_owners,
     )

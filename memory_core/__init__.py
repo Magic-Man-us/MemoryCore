@@ -1,56 +1,22 @@
 """Local typed agent memory with SQLite persistence and Rust vector search."""
 
 from ._native import PyVectorIndex as RustVectorIndex
-from .config import MemoryCoreSettings, build_memory_system, resolve_settings
-from .core import (
-    Embedder,
-    MemoryCandidate,
-    MemoryIndex,
-    MemorySystem,
-    MemoryTrace,
-    PurgeResult,
-    RecallResult,
-    ScoringWeights,
-)
-from .indexing import (
-    RustMemoryIndex,
-)
-from .storage import (
-    Database,
-    DatabaseSettings,
-    LongTermStore,
-    ShortTermStore,
-    SqlWorkingMemory,
-    sqlite_url,
-)
+from .indexing.semantic import IndexPolicy
+from .memory import REQUEST_ADAPTER, RESPONSE_ADAPTER, EmbeddingSpec, MemoryService
+from .memory.interfaces import Embedder
+from .runtime import MemoryCore, RetentionPolicy, RetentionResult
+from .storage import Database
 
 __all__ = [
+    "REQUEST_ADAPTER",
+    "RESPONSE_ADAPTER",
     "Database",
-    "DatabaseSettings",
     "Embedder",
-    "LongTermStore",
-    "MemoryCandidate",
-    "MemoryCoreSettings",
-    "MemoryIndex",
-    "MemorySystem",
-    "MemoryTrace",
-    "PurgeResult",
-    "RecallResult",
-    "RustMemoryIndex",
+    "EmbeddingSpec",
+    "IndexPolicy",
+    "MemoryCore",
+    "MemoryService",
+    "RetentionPolicy",
+    "RetentionResult",
     "RustVectorIndex",
-    "ScoringWeights",
-    "ShortTermStore",
-    "SqlWorkingMemory",
-    "build_memory_system",
-    "resolve_settings",
-    "sqlite_url",
 ]
-
-from .memory import REQUEST_ADAPTER, RESPONSE_ADAPTER, EmbeddingSpec, MemoryService
-
-__all__ += ["REQUEST_ADAPTER", "RESPONSE_ADAPTER", "EmbeddingSpec", "MemoryService"]
-
-from .indexing.semantic import IndexPolicy
-from .runtime import MemoryCore, RetentionPolicy, RetentionResult
-
-__all__ += ["IndexPolicy", "MemoryCore", "RetentionPolicy", "RetentionResult"]

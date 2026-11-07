@@ -4,7 +4,7 @@ import threading
 import pytest
 from sqlalchemy import event
 
-from memory_core import EmbeddingSpec, build_memory_system
+from memory_core import Database, EmbeddingSpec, MemoryService
 from memory_core.memory.errors import EmbeddingError
 from memory_core.memory.models import (
     PreferenceMemory,
@@ -19,7 +19,7 @@ VECTOR = [1.0, 0.0]
 
 
 def make_service(path, **options):
-    return build_memory_system(sqlite_path=path, embedding_spec=SPEC, **options).service
+    return MemoryService(Database(path), embedding_spec=SPEC, **options)
 
 
 async def add(service, owner, value="old", **kwargs):
@@ -222,12 +222,12 @@ async def test_warmed_read_apis_emit_no_write_transactions_or_owner_seed_writes(
 async def test_concurrent_owner_bootstrap_preserves_embedding_identity(tmp_path):
     path = tmp_path / "bootstrap.db"
     first = make_service(path)
-    second = build_memory_system(
-        sqlite_path=path,
+    second = MemoryService(
+        Database(path),
         embedding_spec=EmbeddingSpec(
             model_id="different-model", revision="1", dimensions=2
         ),
-    ).service
+    )
     try:
         results = await asyncio.gather(
             read(first, "new-owner", "preferences"),

@@ -7,7 +7,7 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import text
 
-from memory_core import EmbeddingSpec, MemoryCore, build_memory_system
+from memory_core import Database, EmbeddingSpec, MemoryCore, MemoryService
 from memory_core.memory.errors import ConflictError, ContextRequiredError, SchemaError
 from memory_core.memory.models import (
     AttachEvidence,
@@ -45,9 +45,7 @@ class Embedder:
 
 
 def runtime_at(path, **kwargs):
-    service = build_memory_system(
-        sqlite_path=path, embedding_spec=SPEC, embedder=Embedder()
-    ).service
+    service = MemoryService(Database(path), embedding_spec=SPEC, embedder=Embedder())
     return MemoryCore(
         service,
         maintenance=MaintenancePolicy(

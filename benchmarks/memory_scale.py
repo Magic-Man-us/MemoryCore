@@ -19,7 +19,7 @@ from pathlib import Path
 
 from sqlalchemy import text
 
-from memory_core import EmbeddingSpec, build_memory_system
+from memory_core import Database, EmbeddingSpec, MemoryService
 from memory_core.memory.models import (
     ContainsAny,
     ObservationMemory,
@@ -32,13 +32,12 @@ from memory_core.storage.codec import encode_embedding
 
 async def main(count, dimensions, repetitions):
     with tempfile.TemporaryDirectory() as directory:
-        system = build_memory_system(
-            sqlite_path=Path(directory) / "bench.db",
+        service = MemoryService(
+            Database(Path(directory) / "bench.db"),
             embedding_spec=EmbeddingSpec(
                 model_id="synthetic", revision="1", dimensions=dimensions
             ),
         )
-        service = system.service
         rng = random.Random(42)
         # Reused random vector pool keeps fixture generation cheap and reproducible.
         pool = [[rng.uniform(-1, 1) for _ in range(dimensions)] for _ in range(256)]
