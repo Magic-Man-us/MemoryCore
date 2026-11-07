@@ -6,6 +6,7 @@ import asyncio
 import time
 import zlib
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 from pydantic import Field
 from sqlalchemy import text
@@ -13,6 +14,11 @@ from sqlalchemy import text
 from memory_core.storage.codec import JSON_VALUE
 
 from .models import JobKind, Model
+
+if TYPE_CHECKING:
+    from .core import MemoryCore
+
+type ReclaimReport = dict[str, tuple[int, ...] | bool]
 
 
 class RetentionPolicy(Model):
@@ -31,12 +37,12 @@ class RetentionResult(Model):
     archived_plans: int = 0
 
 
-async def maintain(runtime, owner_id):
+async def maintain(runtime: MemoryCore, owner_id: str) -> RetentionResult:
     policy = runtime.retention
     if not policy.enabled:
         return RetentionResult()
 
-    def run():
+    def run() -> RetentionResult:
         now = time.time()
         cutoff = (
             datetime.now(UTC) - timedelta(days=policy.superseded_after_days)
@@ -170,12 +176,12 @@ async def maintain(runtime, owner_id):
     return await asyncio.to_thread(run)
 
 
-async def reclaim(runtime, *, pages=256):
+async def reclaim(runtime: MemoryCore, *, pages: int = 256) -> ReclaimReport:
     """Explicit idle maintenance; never change auto_vacuum mode on an existing DB."""
     if type(pages) is not int or not 1 <= pages <= 10000:
         raise ValueError("pages must be between 1 and 10000")
 
-    def run():
+    def run() -> ReclaimReport:
         with runtime.service.store.db.session_scope() as session:
             connection = session.connection()
             mode = connection.exec_driver_sql("PRAGMA auto_vacuum").scalar_one()

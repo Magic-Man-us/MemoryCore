@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import text
 
@@ -25,13 +26,22 @@ from .models import (
     KnowledgeGap,
     KnowledgeInput,
     KnowledgeResponse,
+    RequireKnowledgeRequest,
     ResolvedKnowledge,
+    TaskResponse,
     UnresolvedKnowledge,
 )
 from .queue import canonical
 
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
-def is_fresh(gap_json, result_json):
+    from .core import MemoryCore
+    from .models import KnowledgeResult
+    from .queue import TransactionGuard
+
+
+def is_fresh(gap_json: str, result_json: str | None) -> bool:
     if result_json is None:
         return False
     gap = KnowledgeGap.model_validate_json(gap_json)
@@ -45,8 +55,10 @@ def is_fresh(gap_json, result_json):
     )
 
 
-def is_current(session, owner, gap_json, result_json):
-    if not is_fresh(gap_json, result_json):
+def is_current(
+    session: Session, owner: str, gap_json: str, result_json: str | None
+) -> bool:
+    if result_json is None or not is_fresh(gap_json, result_json):
         return False
     result = KNOWLEDGE_ADAPTER.validate_json(result_json)
     for evidence in result.evidence:
@@ -69,10 +81,16 @@ def is_current(session, owner, gap_json, result_json):
     return True
 
 
-async def resolve(runtime, request, owner, *, transaction_guard=None):
+async def resolve(
+    runtime: MemoryCore,
+    request: RequireKnowledgeRequest,
+    owner: str,
+    *,
+    transaction_guard: TransactionGuard | None = None,
+) -> KnowledgeResponse:
     service, queue = runtime.service, runtime.queue
 
-    def begin():
+    def begin() -> tuple[TaskResponse, KnowledgeResult | None]:
         with service._owner_lock(owner), queue.transaction(owner) as session:
             if transaction_guard is not None:
                 transaction_guard(session)
@@ -176,7 +194,7 @@ async def resolve(runtime, request, owner, *, transaction_guard=None):
             reason=f"Knowledge resolution failed: {type(exc).__name__}"
         )
 
-    def finish():
+    def finish() -> KnowledgeResponse:
         with service._owner_lock(owner), queue.transaction(owner) as session:
             if transaction_guard is not None:
                 transaction_guard(session)
@@ -256,7 +274,7 @@ async def resolve(runtime, request, owner, *, transaction_guard=None):
     return await asyncio.to_thread(finish)
 
 
-async def evaluate(runtime, request):
+async def evaluate(runtime: MemoryCore, request: KnowledgeInput) -> KnowledgeResult:
     if runtime.knowledge_evaluator is None:
         return UnresolvedKnowledge(reason="No knowledge evaluator is configured")
     async with asyncio.timeout(runtime.policy.provider_timeout_seconds):

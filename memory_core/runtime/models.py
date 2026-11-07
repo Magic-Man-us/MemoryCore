@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import AwareDatetime, ConfigDict, Field, TypeAdapter
+from pydantic import AwareDatetime, ConfigDict, Field, JsonValue, TypeAdapter
 
 from memory_core.memory.models import (
     ContextResponse,
@@ -335,5 +335,8 @@ RuntimeResponse = Annotated[
     | RetryResponse,
     Field(discriminator="operation"),
 ]
-REQUEST_ADAPTER = TypeAdapter(RuntimeRequest)
-RESPONSE_ADAPTER = TypeAdapter(RuntimeResponse)
+type RuntimeRequestInput = RuntimeRequest | dict[str, JsonValue]
+# TypeAdapter.json_schema() is typed dict[str, Any] by pydantic.
+type JsonSchema = dict[str, Any]
+REQUEST_ADAPTER: TypeAdapter[RuntimeRequest] = TypeAdapter(RuntimeRequest)
+RESPONSE_ADAPTER: TypeAdapter[RuntimeResponse] = TypeAdapter(RuntimeResponse)
