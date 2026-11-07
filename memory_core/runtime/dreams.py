@@ -4,14 +4,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from pydantic import TypeAdapter
 from sqlalchemy import text
 
+from memory_core.memory.dream import DreamScan
 from memory_core.storage.codec import JSON_VALUE
 
 from .models import JobKind
 
 if TYPE_CHECKING:
-    from pydantic import JsonValue
     from sqlalchemy.orm import Session
 
     from memory_core.memory.models import DreamPlan
@@ -19,7 +20,10 @@ if TYPE_CHECKING:
     from .queue import Claim, Queue
 
 
-def scan_for(queue: Queue, claim: Claim) -> JsonValue:
+SCAN_ADAPTER = TypeAdapter(DreamScan)
+
+
+def scan_for(queue: Queue, claim: Claim) -> DreamScan:
     """Pin a high-water mark once, including across retries and process restarts."""
     with (
         queue.service._owner_lock(claim.owner),
@@ -48,7 +52,7 @@ def scan_for(queue: Queue, claim: Claim) -> JsonValue:
                     "id": claim.id,
                 },
             )
-        return payload["scan"]
+        return SCAN_ADAPTER.validate_python(payload["scan"])
 
 
 def advance(queue: Queue, session: Session, claim: Claim, plan: DreamPlan) -> None:

@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING
 from pydantic import Field
 from sqlalchemy import text
 
+from memory_core.memory.payloads import Payloads
+
 from .models import Model
 
 if TYPE_CHECKING:
@@ -78,7 +80,11 @@ def measure(runtime: MemoryCore, owner: str) -> MemoryMeasurements:
         )
         cache = runtime.service._caches.get(owner)
         cached = len(cache.memories) if cache else 0
-        resident = len(cache.memories.resident) if cache else 0
+        resident = (
+            len(cache.memories.resident)
+            if cache and isinstance(cache.memories, Payloads)
+            else 0
+        )
         archived = session.execute(
             text("SELECT COUNT(*) FROM memory_archives WHERE owner=:o"), {"o": owner}
         ).scalar_one()

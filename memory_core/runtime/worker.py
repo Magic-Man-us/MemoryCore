@@ -147,11 +147,9 @@ class Worker:
                 self.service._owner_lock(claim.owner),
                 self.service.store.read_transaction(claim.owner) as session,
             ):
-                return self.queue.task(
-                    session,
-                    claim.owner,
-                    claim.task_id,  # pyright: ignore[reportArgumentType]  # capture jobs always carry a task
-                )
+                # Capture jobs are always enqueued with their task id.
+                assert claim.task_id is not None
+                return self.queue.task(session, claim.owner, claim.task_id)
 
         task = await asyncio.to_thread(load_task)
         payload = claim.payload
