@@ -18,14 +18,16 @@ class LocalSentenceEmbedder:
         revision: str,
         dimensions: int,
         batch_size: int = 32,
-    ):
+    ) -> None:
         path = Path(model_path).expanduser().resolve()
         if not path.is_dir():
             raise ValueError("model_path must be an existing local model directory")
         if batch_size < 1:
             raise ValueError("batch_size must be positive")
         # Optional import: the core engine has no ML runtime dependency.
-        from sentence_transformers import SentenceTransformer  # pyright: ignore[reportMissingImports]
+        from sentence_transformers import (  # pyright: ignore[reportMissingImports]
+            SentenceTransformer,
+        )
 
         self._model = SentenceTransformer(
             str(path), local_files_only=True, trust_remote_code=False, device="cpu"
@@ -42,7 +44,7 @@ class LocalSentenceEmbedder:
         self._lock = threading.Lock()
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
-        def run():
+        def run() -> list[list[float]]:
             with self._lock:
                 return self._model.encode(
                     texts,

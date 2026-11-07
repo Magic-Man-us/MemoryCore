@@ -1,16 +1,33 @@
 """Explicit historical recall streams retained records without growing the hot cache."""
 
+from __future__ import annotations
+
 import zlib
 from datetime import UTC, datetime
 from heapq import nsmallest
+from typing import TYPE_CHECKING
 
 from sqlalchemy import text
 
 from .cache import OwnerCache
 from .models import MemoryHit
 
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
-def recall_history(service, session, owner, request, vector, registry):
+    from .metadata import Registry
+    from .models import RecallRequest
+    from .service import MemoryService
+
+
+def recall_history(
+    service: MemoryService,
+    session: Session,
+    owner: str,
+    request: RecallRequest,
+    vector: list[float],
+    registry: Registry,
+) -> list[MemoryHit]:
     if request.filter is not None:
         registry.check_filter(request.filter)
     rows = session.execute(

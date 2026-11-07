@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 from uuid import uuid4
 
 from pydantic import (
@@ -140,7 +140,7 @@ class MemoryBase(Model):
     valid_until: UtcDatetime | None = None
 
     @model_validator(mode="after")
-    def validity_window(self):
+    def validity_window(self) -> Self:
         if (
             self.valid_from is not None
             and self.valid_until is not None
@@ -215,7 +215,7 @@ class Range(Model):
     maximum: float | None = None
 
     @model_validator(mode="after")
-    def bounds(self):
+    def bounds(self) -> Self:
         if self.minimum is None and self.maximum is None:
             raise ValueError("range needs at least one bound")
         if (
@@ -259,7 +259,7 @@ class RetrievalPolicy(Model):
     minimum_score: float = Field(default=0.0, ge=0, le=1)
 
     @model_validator(mode="after")
-    def weights(self):
+    def weights(self) -> Self:
         if self.semantic_weight + self.lexical_weight <= 0:
             raise ValueError("at least one retrieval weight must be positive")
         return self
@@ -436,7 +436,7 @@ Request = Annotated[
     | DreamApplyRequest,
     Field(discriminator="operation"),
 ]
-REQUEST_ADAPTER = TypeAdapter(Request)
+REQUEST_ADAPTER: TypeAdapter[Request] = TypeAdapter(Request)
 
 
 class RecallResponse(Model):

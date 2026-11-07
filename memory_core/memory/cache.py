@@ -7,6 +7,7 @@ import re
 from collections import defaultdict
 from dataclasses import dataclass
 from heapq import nsmallest
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
 
@@ -24,6 +25,14 @@ from .models import (
 )
 from .payloads import Payloads
 from .reconciliation import equivalence_key
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
+    from datetime import datetime
+
+    from sqlalchemy.orm import Session
+
+    from .models import Memory, MetadataValue
 
 
 def tokens(text_value: str) -> set[str]:
@@ -46,9 +55,9 @@ class OwnerCache:
         dim: int,
         policy: RetrievalPolicy,
         *,
-        include_retired=False,
-        index_policy=None,
-    ):
+        include_retired: bool = False,
+        index_policy: IndexPolicy | None = None,
+    ) -> None:
         self.include_retired = include_retired
         self.policy = policy
         self.generation = -1
@@ -77,7 +86,7 @@ class OwnerCache:
         # Only records with a validity bound; unbounded records are always eligible.
         self.windows = {}
 
-    def sync(self, session, owner, generation):
+    def sync(self, session: Session, owner: str, generation: int) -> None:
         if isinstance(self.memories, Payloads):
             self.memories.bind(session, owner)
         if self.generation == generation:
@@ -101,7 +110,8 @@ class OwnerCache:
             self.discard(uid)
         self.generation = generation
 
-    def update_rows(self, rows):
+    # Any: SQLAlchemy Row cells are untyped.
+    def update_rows(self, rows: Iterable[Sequence[Any]]) -> None:
         for row in rows:
             payload, embedding = row[:2]
             row_generation = row[2] if len(row) > 2 else None
@@ -152,7 +162,7 @@ class OwnerCache:
             elif row_generation is None or row_generation > self.restored_generation:
                 self.vectors.upsert(memory.id, vector)
 
-    def _index_content(self, memory):
+    def _index_content(self, memory: Memory) -> None:
         if memory.status == Status.ACTIVE:
             self.equivalents[self.key(memory)].add(memory.id)
         if memory.kind != MemoryKind.PREFERENCE or memory.status == Status.SUPERSEDED:
@@ -164,7 +174,7 @@ class OwnerCache:
             for value in values:
                 self.preference_terms[field, value_key(value)].add(memory.id)
 
-    def discard(self, uid):
+    def discard(self, uid: str) -> None:
         previous = self.headers.pop(uid, None)
         if previous:
             self.equivalents[previous.equivalent].discard(uid)
@@ -189,7 +199,7 @@ class OwnerCache:
             del self.memories[uid]
         self.vectors.remove(uid)
 
-    def next_boundary(self, after):
+    def next_boundary(self, after: datetime) -> datetime | None:
         """Earliest validity bound later than ``after``, or None when none is pending."""
         return min(
             (
@@ -201,7 +211,7 @@ class OwnerCache:
             default=None,
         )
 
-    def outside_window(self, at):
+    def outside_window(self, at: datetime) -> set[str]:
         return {
             uid
             for uid, (start, end) in self.windows.items()
@@ -209,10 +219,12 @@ class OwnerCache:
         }
 
     @staticmethod
-    def key(memory):
+    def key(memory: Memory) -> str:
         return hashlib.sha256(equivalence_key(memory).encode()).hexdigest()
 
-    def matching_preferences(self, attributes, project_id):
+    def matching_preferences(
+        self, attributes: dict[str, MetadataValue], project_id: str | None
+    ) -> set[str]:
         # OR within each field, AND across required fields. Only matching postings
         # are visited; unrelated preference payloads are never inspected.
         counts = defaultdict(int)
@@ -231,11 +243,13 @@ class OwnerCache:
             if uid in self.by_project[None] or uid in self.by_project[project_id]
         }
 
-    def eligible(self, project_id, *, active=True):
+    def eligible(self, project_id: str | None, *, active: bool = True) -> set[str]:
         scope = self.by_project[None] | self.by_project[project_id]
         return scope & self.by_status["active"] if active else scope
 
-    def search(self, query, vector, ids, limit):
+    def search(
+        self, query: str, vector: list[float], ids: set[str], limit: int
+    ) -> list[tuple[str, float]]:
         # Candidate generation is independent; semantic hits cannot be excluded by
         # lexical seeding. Rank the union using cosine and query-token coverage.
         budget = max(

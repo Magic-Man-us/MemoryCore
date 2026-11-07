@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import text
 
@@ -20,8 +21,15 @@ from .models import (
     Supersede,
 )
 
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
-def equivalence_key(memory):
+    from .cache import OwnerCache
+    from .models import Memory, Reconciliation
+    from .service import MemoryService
+
+
+def equivalence_key(memory: Memory) -> str:
     """Canonical structured content; lifecycle and evidence do not change identity."""
     excluded = {
         "id",
@@ -34,13 +42,22 @@ def equivalence_key(memory):
     return canonical_json(memory.model_dump(mode="json", exclude=excluded))
 
 
-def equivalent(a, b):
+def equivalent(a: Memory, b: Memory) -> bool:
     return equivalence_key(a) == equivalence_key(b)
 
 
 def apply_reconciliation(
-    service, session, owner, cache, memory, vector, decision, allowed, *, write=True
-):
+    service: MemoryService,
+    session: Session,
+    owner: str,
+    cache: OwnerCache,
+    memory: Memory,
+    vector: list[float] | None,
+    decision: Reconciliation,
+    allowed: set[str],
+    *,
+    write: bool = True,
+) -> tuple[Memory, int]:
     """Apply one reconciliation decision.
 
     ``write=False`` for maintenance (dream) applies: they must not count toward
@@ -66,13 +83,17 @@ def apply_reconciliation(
             if (
                 isinstance(decision, Supersede)
                 and isinstance(memory, PreferenceMemory)
+                and isinstance(target, PreferenceMemory)
                 and target.explicit
                 and not memory.explicit
             ):
                 raise SchemaError(
                     "an inferred preference cannot supersede an explicit one; flag a conflict"
                 )
-            if isinstance(memory, PreferenceMemory) and (
+            if (
+                isinstance(memory, PreferenceMemory)
+                and isinstance(target, PreferenceMemory)
+            ) and (
                 target.preference_key != memory.preference_key
                 or target.applicability != memory.applicability
             ):
@@ -80,6 +101,7 @@ def apply_reconciliation(
             if (
                 isinstance(decision, AttachEvidence)
                 and isinstance(memory, PreferenceMemory)
+                and isinstance(target, PreferenceMemory)
                 and (canonical_json(target.value) != canonical_json(memory.value))
             ):
                 raise SchemaError(
@@ -105,7 +127,7 @@ def apply_reconciliation(
         {
             "new_id": memory.id,
             "target_id": None if isinstance(decision, Create) else decision.target_id,
-            "sources": memory.source_refs,
+            "sources": list(memory.source_refs),
         },
         write=write,
     )

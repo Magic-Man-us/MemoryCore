@@ -7,9 +7,15 @@ import tempfile
 from enum import StrEnum
 from pathlib import Path
 from threading import RLock
-from typing import Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    import numpy as np
+    from numpy.typing import NDArray
 
 
 class IndexBackend(StrEnum):
@@ -45,7 +51,7 @@ class CandidateIndex(Protocol):
 
 
 class HnswIndex:
-    def __init__(self, dimensions: int, policy: IndexPolicy):
+    def __init__(self, dimensions: int, policy: IndexPolicy) -> None:
         try:
             import hnswlib
             import numpy as np
@@ -63,7 +69,8 @@ class HnswIndex:
         self.last_search = "none"
         self.last_candidates = 0
 
-    def _new(self, capacity):
+    # Any: hnswlib ships no type information.
+    def _new(self, capacity: int) -> Any:  # noqa: ANN401
         graph = self.library.Index(space="cosine", dim=self.dimensions)
         graph.init_index(
             max_elements=capacity,
@@ -75,7 +82,7 @@ class HnswIndex:
         graph.set_ef(self.policy.ef_search)
         return graph
 
-    def _vector(self, vector):
+    def _vector(self, vector: Sequence[float]) -> NDArray[np.float32]:
         v = self.np.asarray(vector, dtype=self.np.float32)
         if v.shape != (self.dimensions,) or not self.np.isfinite(v).all():
             raise ValueError("invalid embedding dimensions or values")
@@ -84,7 +91,7 @@ class HnswIndex:
             raise ValueError("zero embedding is not searchable")
         return (v / norm).astype(self.np.float32)
 
-    def upsert(self, uid, vector):
+    def upsert(self, uid: str, vector: Sequence[float]) -> None:
         v = self._vector(vector)
         with self.lock:
             if uid not in self.labels:
@@ -97,7 +104,7 @@ class HnswIndex:
             self.active.add(uid)
             self.updates += 1
 
-    def remove(self, uid):
+    def remove(self, uid: str) -> bool:
         with self.lock:
             if uid not in self.active:
                 return False
@@ -106,7 +113,9 @@ class HnswIndex:
             self.updates += 1
             return True
 
-    def _exact(self, vector, ids, k):
+    def _exact(
+        self, vector: NDArray[np.float32], ids: list[str], k: int
+    ) -> list[tuple[str, float]]:
         # Bound the scratch matrix; do not materialize all eligible vectors at once.
         best = []
         for start in range(0, len(ids), 1024):
@@ -116,7 +125,9 @@ class HnswIndex:
             best = sorted(best, key=lambda hit: (-hit[1], hit[0]))[:k]
         return best
 
-    def search(self, vector, ids, k):
+    def search(
+        self, vector: list[float], ids: list[str], k: int
+    ) -> list[tuple[str, float]]:
         query = self._vector(vector)
         with self.lock:
             eligible = self.active.intersection(ids)
@@ -150,7 +161,7 @@ class HnswIndex:
                     return self._exact(query, sorted(eligible), k)
                 count *= 2
 
-    def snapshot(self):
+    def snapshot(self) -> tuple[str, bytes]:
         with self.lock:
             # Rebuild tombstones at checkpoint, not during foreground queries.
             if len(self.labels) - len(self.active) > max(32, len(self.labels) // 5):
@@ -178,7 +189,7 @@ class HnswIndex:
             ).model_dump_json()
             return manifest, blob
 
-    def restore(self, manifest, blob):
+    def restore(self, manifest: str, blob: bytes) -> None:
         with self.lock:
             data = GraphManifest.model_validate_json(manifest)
             if data.version != 1 or hashlib.sha256(blob).hexdigest() != data.digest:

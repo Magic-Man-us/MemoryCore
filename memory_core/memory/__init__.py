@@ -1,5 +1,7 @@
 """Extensible typed memory, metadata, reconciliation, and dream maintenance."""
 
+from __future__ import annotations
+
 from .models import MEMORY_ADAPTER, REQUEST_ADAPTER, RESPONSE_ADAPTER, EmbeddingSpec
 from .service import MemoryService
 

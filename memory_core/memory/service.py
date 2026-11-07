@@ -9,12 +9,13 @@ import threading
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING, overload
 from weakref import WeakValueDictionary
 
-from pydantic import BaseModel
+from pydantic import BaseModel, JsonValue
 from sqlalchemy import text
 
-from memory_core.indexing.semantic import HnswIndex, IndexBackend
+from memory_core.indexing.semantic import HnswIndex, IndexBackend, IndexPolicy
 from memory_core.storage.database import Database
 
 from .cache import OwnerCache
@@ -31,6 +32,7 @@ from .models import (
     Create,
     DreamApplyRequest,
     DreamPlanRequest,
+    DreamResponse,
     EmbeddingSpec,
     MemoryHit,
     PreferenceMemory,
@@ -51,6 +53,24 @@ from .preferences import resolve_preferences
 from .reconciliation import apply_reconciliation, equivalent
 from .store import Store
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from sqlalchemy.engine import RowMapping
+    from sqlalchemy.orm import Session
+
+    from .models import (
+        DescribeSchemaRequest,
+        FieldResponse,
+        FieldsResponse,
+        ListFieldsRequest,
+        ListValuesRequest,
+        Memory,
+        RegisterFieldRequest,
+        SchemaResponse,
+        ValuesResponse,
+    )
+
 
 class MemoryService:
     def __init__(
@@ -64,14 +84,12 @@ class MemoryService:
         dream_after_writes: int = 100,
         retrieval_policy: RetrievalPolicy | None = None,
         max_cached_owners: int = 16,
-        index_policy=None,
-    ):
+        index_policy: IndexPolicy | dict[str, JsonValue] | None = None,
+    ) -> None:
         if dream_after_writes < 1:
             raise ValueError("dream_after_writes must be positive")
         if type(max_cached_owners) is not int or max_cached_owners < 1:
             raise ValueError("max_cached_owners must be a positive integer")
-        from memory_core.indexing.semantic import IndexPolicy
-
         self.index_policy = IndexPolicy.model_validate(index_policy or IndexPolicy())
         self.max_cached_owners = max_cached_owners
         self.retrieval_policy = retrieval_policy or RetrievalPolicy()
@@ -83,11 +101,15 @@ class MemoryService:
         self.dream_after_writes = dream_after_writes
         self._caches: OrderedDict[str, OwnerCache] = OrderedDict()
         self._cache_lock = threading.RLock()
-        self._owner_locks = WeakValueDictionary()
-        self._receipts = {}
-        self._commit_observer = None
+        self._owner_locks: WeakValueDictionary[str, threading.RLock] = (
+            WeakValueDictionary()
+        )
+        self._receipts: dict[
+            tuple[str, str], tuple[str, str, int, datetime | None]
+        ] = {}
+        self._commit_observer: Callable[[Session, str], None] | None = None
 
-    def _owner_lock(self, owner):
+    def _owner_lock(self, owner: str) -> threading.RLock:
         with self._cache_lock:
             lock = self._owner_locks.get(owner)
             if lock is None:
@@ -95,7 +117,9 @@ class MemoryService:
                 self._owner_locks[owner] = lock
             return lock
 
-    def _snapshot(self, session, owner):
+    def _snapshot(
+        self, session: Session, owner: str
+    ) -> tuple[OwnerCache, Registry, RowMapping]:
         state = self.store.state(session, owner)
         identity = self.spec.model_dump_json()
         if state["embedding_spec"] is None:
@@ -154,8 +178,8 @@ class MemoryService:
                 evicted.append(self._caches.popitem(last=False))
         return cache, cache.registry, state
 
-    async def checkpoint_indexes(self, *, force=False):
-        def save():
+    async def checkpoint_indexes(self, *, force: bool = False) -> int:
+        def save() -> int:
             if self.index_policy.backend != IndexBackend.HNSW:
                 return 0
             saved = 0
@@ -201,7 +225,9 @@ class MemoryService:
 
         return await asyncio.to_thread(save)
 
-    async def _vector(self, supplied, value):
+    async def _vector(
+        self, supplied: Sequence[float] | None, value: str
+    ) -> list[float]:
         if supplied is None:
             if self.embedder is None:
                 raise EmbeddingError(
@@ -224,7 +250,49 @@ class MemoryService:
         norm = math.hypot(*vector)
         return [v / norm for v in vector]
 
-    async def call(self, request: Request | dict, *, owner_id: str) -> Response:
+    @overload
+    async def call(
+        self, request: RememberRequest, *, owner_id: str
+    ) -> RememberResponse: ...
+    @overload
+    async def call(
+        self, request: RecallRequest, *, owner_id: str
+    ) -> RecallResponse: ...
+    @overload
+    async def call(
+        self, request: ResolvePreferencesRequest, *, owner_id: str
+    ) -> PreferencesResponse: ...
+    @overload
+    async def call(
+        self, request: PrepareContextRequest, *, owner_id: str
+    ) -> ContextResponse: ...
+    @overload
+    async def call(
+        self, request: DescribeSchemaRequest, *, owner_id: str
+    ) -> SchemaResponse: ...
+    @overload
+    async def call(
+        self, request: ListFieldsRequest, *, owner_id: str
+    ) -> FieldsResponse: ...
+    @overload
+    async def call(
+        self, request: RegisterFieldRequest, *, owner_id: str
+    ) -> FieldResponse: ...
+    @overload
+    async def call(
+        self, request: ListValuesRequest, *, owner_id: str
+    ) -> ValuesResponse: ...
+    @overload
+    async def call(
+        self, request: DreamPlanRequest | DreamApplyRequest, *, owner_id: str
+    ) -> DreamResponse: ...
+    @overload
+    async def call(
+        self, request: dict[str, JsonValue], *, owner_id: str
+    ) -> Response: ...
+    async def call(
+        self, request: Request | dict[str, JsonValue], *, owner_id: str
+    ) -> Response:
         # Revalidate Python instances too: model_copy updates can bypass constructors.
         request = REQUEST_ADAPTER.validate_python(
             request.model_dump(mode="json")
@@ -251,7 +319,7 @@ class MemoryService:
         return await asyncio.to_thread(catalog, self, request, owner_id)
 
     @staticmethod
-    def _normalize(memory, registry):
+    def _normalize(memory: Memory, registry: Registry) -> Memory:
         data = memory.model_dump()
         data["metadata"] = registry.normalize(memory.metadata)
         if isinstance(memory, PreferenceMemory):
@@ -276,7 +344,7 @@ class MemoryService:
     async def recall(self, request: RecallRequest, *, owner_id: str) -> RecallResponse:
         vector = await self._vector(request.embedding, request.query)
 
-        def run():
+        def run() -> RecallResponse:
             with (
                 self._owner_lock(owner_id),
                 self.store.read_transaction(
@@ -314,7 +382,7 @@ class MemoryService:
     async def resolve_prefs(
         self, context: TaskContext, *, owner_id: str
     ) -> PreferencesResponse:
-        def run():
+        def run() -> PreferencesResponse:
             with (
                 self._owner_lock(owner_id),
                 self.store.read_transaction(
@@ -329,11 +397,15 @@ class MemoryService:
         return await asyncio.to_thread(run)
 
     async def remember_reconciled(
-        self, request: RememberRequest, *, owner_id: str, _commit=None
+        self,
+        request: RememberRequest,
+        *,
+        owner_id: str,
+        _commit: Callable[[Session, RememberResponse], None] | None = None,
     ) -> RememberResponse:
         vector = await self._vector(request.embedding, request.memory.summary)
 
-        def inspect():
+        def inspect() -> tuple[Memory, list[MemoryHit], int]:
             with (
                 self._owner_lock(owner_id),
                 self.store.read_transaction(
@@ -396,7 +468,7 @@ class MemoryService:
                     )
                     break
 
-        def persist():
+        def persist() -> RememberResponse:
             with (
                 self._owner_lock(owner_id),
                 self.store.transaction(owner_id) as session,
@@ -443,11 +515,16 @@ class MemoryService:
         return result
 
     async def prepare_task_context(
-        self, context: TaskContext, *, owner_id: str, query=None, limit=5
-    ):
+        self,
+        context: TaskContext,
+        *,
+        owner_id: str,
+        query: str | None = None,
+        limit: int = 5,
+    ) -> ContextResponse:
         vector = await self._vector(None, query) if query else None
 
-        def run():
+        def run() -> ContextResponse:
             with (
                 self._owner_lock(owner_id),
                 self.store.read_transaction(
@@ -461,7 +538,7 @@ class MemoryService:
                 )
                 supporting = (
                     []
-                    if vector is None
+                    if query is None or vector is None
                     else [
                         MemoryHit(
                             memory=cache.memories[uid].model_copy(deep=True),
@@ -499,8 +576,8 @@ class MemoryService:
 
     async def validate_context(
         self, receipt: str, context: TaskContext, *, owner_id: str
-    ):
-        def run():
+    ) -> None:
+        def run() -> None:
             with (
                 self._owner_lock(owner_id),
                 self.store.read_transaction(
@@ -526,9 +603,13 @@ class MemoryService:
 
         await asyncio.to_thread(run)
 
-    async def run_with_context(
-        self, context: TaskContext, action: Callable[..., Awaitable], *, owner_id: str
-    ):
+    async def run_with_context[T](
+        self,
+        context: TaskContext,
+        action: Callable[[ContextResponse], Awaitable[T]],
+        *,
+        owner_id: str,
+    ) -> T:
         """SDK-independent hook: caller receives context before invoking its coding action.
 
         Editing tools should additionally call validate_context immediately before mutation.
@@ -537,17 +618,19 @@ class MemoryService:
         prepared = await self.prepare_task_context(context, owner_id=owner_id)
         return await action(prepared)
 
-    async def dream_due(self, owner_id):
+    async def dream_due(self, owner_id: str) -> bool:
         from .dream import due
 
         return await asyncio.to_thread(due, self, owner_id)
 
-    async def dream(self, *, owner_id, request=None):
+    async def dream(
+        self, *, owner_id: str, request: DreamPlanRequest | None = None
+    ) -> DreamResponse:
         from .dream import plan
 
         return await plan(self, owner_id, request or DreamPlanRequest())
 
-    async def apply_dream(self, plan_id, *, owner_id):
+    async def apply_dream(self, plan_id: str, *, owner_id: str) -> DreamResponse:
         from .dream import apply
 
         return await apply(self, owner_id, plan_id)

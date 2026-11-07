@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from bisect import bisect_left, bisect_right
 from collections import defaultdict
+from typing import TYPE_CHECKING
 
 from .errors import SchemaError
 from .models import (
@@ -19,7 +20,11 @@ from .models import (
     Filter,
     MetadataValue,
     Range,
+    Scalar,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 # Field shapes only; values (python, uv, customer-specific tools, etc.) are never predefined.
 DEFAULT_FIELDS = tuple(
@@ -32,7 +37,7 @@ DEFAULT_FIELDS = tuple(
 
 
 class Registry:
-    def __init__(self, fields: list[FieldDefinition]):
+    def __init__(self, fields: list[FieldDefinition]) -> None:
         self.fields = {f.name: f for f in fields}
         self.aliases: dict[str, str] = {}
         for field in fields:
@@ -51,7 +56,7 @@ class Registry:
             ) from exc
 
     @staticmethod
-    def check_value(field: FieldDefinition, value: MetadataValue) -> None:
+    def check_value(field: FieldDefinition, value: Scalar | Sequence[Scalar]) -> None:
         match field.type:
             case FieldType.KEYWORD:
                 valid = type(value) is str
@@ -69,7 +74,7 @@ class Registry:
             raise SchemaError(f"{field.name} requires {field.type}")
 
     def normalize(
-        self, data: dict[str, MetadataValue], *, allow_read_only=False
+        self, data: dict[str, MetadataValue], *, allow_read_only: bool = False
     ) -> dict[str, MetadataValue]:
         result = {}
         for name, value in data.items():
@@ -107,13 +112,13 @@ class Registry:
                 self.check_value(field, value)
 
 
-def value_key(value):
+def value_key(value: Scalar) -> tuple[str, Scalar]:
     # bool and int must never share an index key (True == 1 in Python).
     return ("number" if type(value) in (int, float) else type(value).__name__, value)
 
 
 class MetadataIndex:
-    def __init__(self):
+    def __init__(self) -> None:
         self.postings: dict[str, dict[tuple, set[str]]] = defaultdict(
             lambda: defaultdict(set)
         )
@@ -121,7 +126,7 @@ class MetadataIndex:
         self.values: dict[str, dict[str, MetadataValue]] = {}
         self.numeric_sorted: dict[str, list[float]] = {}
 
-    def remove(self, uid: str):
+    def remove(self, uid: str) -> None:
         previous = self.values.pop(uid, {})
         for field, value in previous.items():
             self.numeric_sorted.pop(field, None)
@@ -133,7 +138,7 @@ class MetadataIndex:
                 if not posting:
                     del self.postings[field][key]
 
-    def upsert(self, uid: str, data: dict[str, MetadataValue]):
+    def upsert(self, uid: str, data: dict[str, MetadataValue]) -> None:
         self.remove(uid)
         self.values[uid] = data
         for field, value in data.items():

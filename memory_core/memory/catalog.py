@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from sqlalchemy import text
 
 from .errors import SchemaError
@@ -20,8 +22,18 @@ from .models import (
     ValuesResponse,
 )
 
+if TYPE_CHECKING:
+    from .service import MemoryService
 
-def catalog(service, request, owner):
+
+def catalog(
+    service: MemoryService,
+    request: DescribeSchemaRequest
+    | ListFieldsRequest
+    | RegisterFieldRequest
+    | ListValuesRequest,
+    owner: str,
+) -> SchemaResponse | FieldsResponse | FieldResponse | ValuesResponse:
     transaction = (
         service.store.transaction(owner)
         if isinstance(request, RegisterFieldRequest)

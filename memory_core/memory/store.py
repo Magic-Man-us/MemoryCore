@@ -7,6 +7,7 @@ snapshot after one-time owner initialization.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from typing import TYPE_CHECKING
 
 from sqlalchemy import text
 
@@ -14,6 +15,17 @@ from memory_core.storage.codec import JSON_VALUE
 
 from .metadata import DEFAULT_FIELDS
 from .models import FieldDefinition
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from pydantic import JsonValue
+    from sqlalchemy.engine import RowMapping
+    from sqlalchemy.orm import Session
+
+    from memory_core.storage.database import Database
+
+    from .models import Memory
 
 DDL = (
     "CREATE TABLE IF NOT EXISTS memory_dream_archives (owner TEXT NOT NULL,id TEXT NOT NULL,payload BLOB NOT NULL,PRIMARY KEY(owner,id))",
@@ -46,7 +58,7 @@ DDL = (
 
 
 class Store:
-    def __init__(self, db):
+    def __init__(self, db: Database) -> None:
         self.db = db
         with db.session_scope() as session:
             for ddl in DDL:
@@ -54,7 +66,7 @@ class Store:
             session.commit()
 
     @contextmanager
-    def transaction(self, owner: str):
+    def transaction(self, owner: str) -> Iterator[Session]:
         if not owner:
             raise ValueError("authenticated owner must be nonempty")
         with self.db.session_scope() as session:
@@ -78,7 +90,9 @@ class Store:
             session.commit()
 
     @contextmanager
-    def read_transaction(self, owner: str, *, embedding_spec: str | None = None):
+    def read_transaction(
+        self, owner: str, *, embedding_spec: str | None = None
+    ) -> Iterator[Session]:
         if not owner:
             raise ValueError("authenticated owner must be nonempty")
         with self.db.session_scope() as session:
@@ -102,7 +116,7 @@ class Store:
             yield session
 
     @staticmethod
-    def state(session, owner):
+    def state(session: Session, owner: str) -> RowMapping:
         return (
             session.execute(
                 text("SELECT * FROM memory_owners WHERE owner=:owner"), {"owner": owner}
@@ -112,7 +126,7 @@ class Store:
         )
 
     @staticmethod
-    def fields(session, owner):
+    def fields(session: Session, owner: str) -> list[FieldDefinition]:
         return [
             FieldDefinition.model_validate_json(row[0])
             for row in session.execute(
@@ -124,7 +138,14 @@ class Store:
         ]
 
     @staticmethod
-    def bump(session, owner, action, detail, *, write=True):
+    def bump(
+        session: Session,
+        owner: str,
+        action: str,
+        detail: JsonValue,
+        *,
+        write: bool = True,
+    ) -> int:
         session.execute(
             text(
                 "UPDATE memory_owners SET generation=generation+1,writes=writes+:write WHERE owner=:owner"
@@ -146,7 +167,7 @@ class Store:
         return generation
 
     @staticmethod
-    def contains(session, owner, memory_id):
+    def contains(session: Session, owner: str, memory_id: str) -> bool:
         return (
             session.execute(
                 text(
@@ -158,7 +179,13 @@ class Store:
         )
 
     @staticmethod
-    def put(session, owner, memory, embedding, generation):
+    def put(
+        session: Session,
+        owner: str,
+        memory: Memory,
+        embedding: bytes | None,
+        generation: int,
+    ) -> None:
         session.execute(
             text("""INSERT INTO memories_v1(owner,id,generation,payload,embedding)
             VALUES (:o,:id,:g,:p,:e) ON CONFLICT(owner,id) DO UPDATE SET

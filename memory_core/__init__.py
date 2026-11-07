@@ -1,5 +1,7 @@
 """Local typed agent memory with SQLite persistence and Rust vector search."""
 
+from __future__ import annotations
+
 from ._native import PyVectorIndex as RustVectorIndex
 from .indexing.semantic import IndexPolicy
 from .memory import REQUEST_ADAPTER, RESPONSE_ADAPTER, EmbeddingSpec, MemoryService
