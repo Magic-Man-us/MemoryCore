@@ -7,7 +7,7 @@ set by host code calling ``MemoryCore.call`` directly, never by a tool call.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel
 
@@ -18,7 +18,6 @@ from .models import REQUEST_ADAPTER, RESPONSE_ADAPTER
 if TYPE_CHECKING:
     from pydantic import JsonValue
 
-    from .core import MemoryCore
     from .models import (
         JsonSchema,
         RuntimeRequest,
@@ -41,11 +40,20 @@ def untrusted(request: RuntimeRequestInput) -> RuntimeRequest:
     return request
 
 
-class MemoryTools:
-    def __init__(self, memory: MemoryCore, *, owner_id: str) -> None:
+class MemoryBackend(Protocol):
+    """MemoryCore and MemoryService both satisfy this."""
+
+    async def call(
+        self, request: dict[str, JsonValue], *, owner_id: str
+    ) -> BaseModel: ...
+
+
+class MemoryTools[B: MemoryBackend]:
+    def __init__(self, memory: B, *, owner_id: str) -> None:
         if not owner_id:
             raise ValueError("authenticated owner is required")
-        self.memory, self.owner_id = memory, owner_id
+        self.memory: B = memory
+        self.owner_id = owner_id
 
     @property
     def input_schema(self) -> JsonSchema:
@@ -60,7 +68,8 @@ class MemoryTools:
         return schema
 
     async def invoke(self, arguments: dict[str, JsonValue]) -> dict[str, JsonValue]:
-        response = await self.memory.call(untrusted(arguments), owner_id=self.owner_id)
+        request = untrusted(arguments).model_dump(mode="json")
+        response = await self.memory.call(request, owner_id=self.owner_id)
         return RESPONSE_ADAPTER.validate_python(
             response.model_dump(mode="json")
         ).model_dump(mode="json")
