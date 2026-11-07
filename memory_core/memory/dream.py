@@ -115,13 +115,13 @@ async def plan(
             ):
                 raise ConflictError("memory changed during dream snapshot; replan")
             memory = cache.memories.get(uid)
-            if memory is None or memory.status != Status.ACTIVE or not raw:
+            vector = decode_embedding(raw)
+            if memory is None or memory.status != Status.ACTIVE or vector is None:
                 return None
             ids = cache.eligible(memory.scope.project_id) - {uid}
-            # decode_embedding is None only for a corrupt cell; raw is nonempty here.
             hits = cache.search(
                 memory.summary,
-                decode_embedding(raw),  # pyright: ignore[reportArgumentType]
+                vector,
                 ids,
                 request.neighbors_per_memory,
             )

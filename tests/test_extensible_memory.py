@@ -951,3 +951,16 @@ async def test_corrupt_embedding_cell_hydrates_without_a_vector(service):
     )
     hits = await recall(fresh)
     assert [hit.memory.id for hit in hits.hits] == ["good"]
+
+
+async def test_dream_plan_skips_records_with_corrupt_embeddings(service):
+    await remember(service, observation("good"))
+    await remember(service, observation("corrupt"))
+    with service.store.db.session_scope() as session:
+        session.execute(
+            text("UPDATE memories_v1 SET embedding=:e WHERE id='corrupt'"),
+            {"e": b"MCV1bad"},
+        )
+        session.commit()
+    planned = await service.call(DreamPlanRequest(batch_size=8), owner_id="alice")
+    assert "corrupt" not in {group.memory.id for group in planned.plan.groups}
