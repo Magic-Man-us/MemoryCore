@@ -14,15 +14,22 @@ import inspect
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from enum import StrEnum
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from pydantic import Field, ValidationError
+from pydantic import Field, JsonValue, ValidationError
 
 from memory_core.memory.errors import MemoryError
 from memory_core.runtime import MemoryCore, MemoryTools
 from memory_core.runtime.catalog import SPECS, schemas
 from memory_core.runtime.models import Model
 from memory_core.storage.codec import JSON_VALUE
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Collection, Iterable, Mapping
+
+    from mcp.server import Server
+    from mcp.server.context import ServerRequestContext
+    from mcp.types import CallToolRequestParams, PaginatedRequestParams
 
 
 class ToolOperation(StrEnum):
@@ -45,11 +52,11 @@ def create_server(
     memory: MemoryCore,
     *,
     owner_id: str,
-    allowed_operations=None,
-    bound_arguments=None,
-    tool_adapter=None,
-    manage_lifecycle=True,
-):
+    allowed_operations: Collection[str] | None = None,
+    bound_arguments: Mapping[str, dict[str, JsonValue]] | None = None,
+    tool_adapter: MemoryTools | None = None,
+    manage_lifecycle: bool = True,
+) -> Server[MemoryCore]:
     """Create a server for one trusted owner; enforce an optional operation allowlist.
 
     This factory is for local stdio or an already-authenticated host. Do not expose
@@ -104,17 +111,22 @@ def create_server(
         )
 
     @asynccontextmanager
-    async def lifespan(server):
+    async def lifespan(server: Server[MemoryCore]) -> AsyncIterator[MemoryCore]:
         if manage_lifecycle:
             async with memory:
                 yield memory
         else:
             yield memory
 
-    async def list_tools(context, params):
+    async def list_tools(
+        context: ServerRequestContext[MemoryCore],
+        params: PaginatedRequestParams | None,
+    ) -> ListToolsResult:
         return ListToolsResult(tools=definitions)
 
-    def failure(code, message, issues=()):
+    def failure(
+        code: str, message: str, issues: Iterable[ValidationIssue] = ()
+    ) -> CallToolResult:
         failure_result = ToolFailure(code=code, message=message, issues=list(issues))
         # Error results use the modeled error envelope. The advertised success
         # schema describes successful calls; clients skip it when is_error=True.
@@ -124,7 +136,10 @@ def create_server(
             content=[TextContent(type="text", text=failure_result.model_dump_json())],
         )
 
-    async def call_tool(context, params):
+    async def call_tool(
+        context: ServerRequestContext[MemoryCore],
+        params: CallToolRequestParams,
+    ) -> CallToolResult:
         if params.name not in allowed:
             return failure(
                 "UnknownOperation", "Operation is unavailable on this server"
@@ -169,7 +184,12 @@ def create_server(
     )
 
 
-async def serve_stdio(memory: MemoryCore, *, owner_id: str, allowed_operations=None):
+async def serve_stdio(
+    memory: MemoryCore,
+    *,
+    owner_id: str,
+    allowed_operations: Collection[str] | None = None,
+) -> None:
     from mcp.server.stdio import stdio_server
 
     server = create_server(
@@ -181,7 +201,7 @@ async def serve_stdio(memory: MemoryCore, *, owner_id: str, allowed_operations=N
         )
 
 
-async def _main(factory_path, owner, allowed):
+async def _main(factory_path: str, owner: str, allowed: Collection[str] | None) -> None:
     module_name, separator, attribute = factory_path.partition(":")
     if not separator or not module_name or not attribute:
         raise ValueError("factory must be module:callable")
@@ -199,7 +219,7 @@ async def _main(factory_path, owner, allowed):
         memory.service.store.db.dispose()
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--factory",

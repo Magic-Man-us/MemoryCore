@@ -1,5 +1,7 @@
 """Narrow SDK/testing boundaries; implementations must cooperate with cancellation."""
 
+from __future__ import annotations
+
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Protocol
 
