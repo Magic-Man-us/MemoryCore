@@ -37,6 +37,12 @@ async with memory:
 hnswlib and NumPy; building hnswlib may require a C++ compiler. It does not download
 an embedding model. The default backend remains `exact`, with no ANN dependency.
 
+The `hnsw` backend is experimental. On 100,000 random 384-dimensional vectors it matched 90%
+of exact top-10 results at `ef_search=2048`
+([ann-100000-ef2048.json](benchmarks/ann-100000-ef2048.json)). Matching 100% took
+`ef_search=8192`, at a 52 ms median against 66 ms for exact search
+([ann-100000-ef8192.json](benchmarks/ann-100000-ef8192.json)).
+
 Semantic retrieval first computes eligible IDs using owner, scope, status and
 metadata constraints. Small eligible sets use exact scoring. Larger sets retrieve
 approximate candidates, apply eligibility, and widen the search when too few remain.
