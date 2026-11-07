@@ -68,10 +68,6 @@ weighted nonnegative cosine similarity and query-token coverage. `RetrievalPolic
 weights, candidate budgets, and a minimum score. The defaults are 0.7 semantic and 0.3 lexical.
 Ties break by ID. This is token-overlap ranking, not BM25 or an LLM reranker.
 
-The legacy conversation engine now searches all of a user's vectors; a keyword flood no
-longer removes semantically relevant records before scoring. The typed service provides
-the richer metadata and combined ranking path.
-
 There is no ANN or k-means dependency. Measure exact-search latency and recall first;
 `benchmarks/memory_scale.py` measures end-to-end mechanics. `evaluate_retrieval` measures
 recall@k, precision@k, reciprocal rank, and latency against labeled query cases. It does
@@ -103,5 +99,5 @@ Embedding identity includes model ID, revision, and dimensions. A model change c
 silently mix incompatible vectors.
 
 `MemoryService` contains orchestration; `catalog.py`, `preferences.py`, `reconciliation.py`,
-`dream.py`, and `migration.py` implement the individual workflows. Internal indexes use
+and `dream.py` implement the individual workflows. Internal indexes use
 ordinary Python containers and Rust structs; Pydantic remains at boundaries.

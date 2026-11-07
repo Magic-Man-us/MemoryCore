@@ -12,13 +12,13 @@ from weakref import WeakValueDictionary
 
 from sqlalchemy import text
 
-from memory_core.core.interfaces import Embedder
+
 from memory_core.storage.database import Database
 
 from .cache import OwnerCache
 from .catalog import catalog
 from .errors import ConflictError, ContextRequiredError, EmbeddingError, SchemaError
-from .interfaces import DreamPlanner, Reconciler
+from .interfaces import DreamPlanner, Embedder, Reconciler
 from .metadata import Registry
 from .models import (
     DECISION_ADAPTER,

@@ -402,3 +402,18 @@ async def test_applied_dream_replacements_do_not_count_as_writes(tmp_path):
             assert pending == 0
     finally:
         memory.service.store.db.engine.dispose()
+
+
+async def test_local_accepts_embedding_spec_as_mapping(tmp_path):
+    memory = MemoryCore.local(
+        tmp_path / "mapping.db",
+        embedding_spec={"model_id": "growth", "revision": "1", "dimensions": 2},
+        embedder=Embedder(),
+    )
+    try:
+        assert isinstance(memory.service.spec, EmbeddingSpec)
+        await write(memory, 0, 1)
+        hits = await memory.call(RecallRequest(query="fact"), owner_id="alice")
+        assert [hit.memory.id for hit in hits.hits] == ["m000000"]
+    finally:
+        memory.service.store.db.engine.dispose()

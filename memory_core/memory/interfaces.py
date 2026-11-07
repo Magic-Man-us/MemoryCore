@@ -13,3 +13,13 @@ class Reconciler(Protocol):
 
 class DreamPlanner(Protocol):
     async def __call__(self, groups: list[DreamGroup]) -> DreamProposal: ...
+
+
+class Embedder(Protocol):
+    """Turns text into embedding vectors; one vector per input, all the same dimension.
+
+    With an embedder, remember and recall accept raw text and no vectors are needed at
+    call sites.
+    """
+
+    async def embed(self, texts: list[str]) -> list[list[float]]: ...

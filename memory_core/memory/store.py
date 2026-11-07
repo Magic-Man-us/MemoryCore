@@ -41,18 +41,11 @@ DDL = (
     """CREATE TABLE IF NOT EXISTS memory_dreams (
        owner TEXT NOT NULL, id TEXT NOT NULL, payload TEXT NOT NULL,
        PRIMARY KEY(owner,id))""",
-    """CREATE TABLE IF NOT EXISTS memory_imports (
-       owner TEXT NOT NULL, source TEXT NOT NULL, id TEXT NOT NULL,
-       PRIMARY KEY(owner,source,id))""",
 )
 
 
 class Store:
     def __init__(self, db):
-        if not db.is_sqlite:
-            raise ValueError(
-                "the extensible memory service currently requires local SQLite"
-            )
         self.db = db
         with db.session_scope() as session:
             for ddl in DDL:

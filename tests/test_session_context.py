@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from memory_core import EmbeddingSpec, MemoryCore, build_memory_system
+from memory_core import Database, EmbeddingSpec, MemoryCore, MemoryService
 from memory_core.integrations import (
     ContextUpdate,
     SessionContext,
@@ -38,13 +38,13 @@ class Embedder:
 def memory(tmp_path):
     embedder = Embedder()
     runtime = MemoryCore(
-        build_memory_system(
-            sqlite_path=tmp_path / "sessions.db",
+        MemoryService(
+            Database(tmp_path / "sessions.db"),
             embedding_spec=EmbeddingSpec(
                 model_id="fixture", revision="1", dimensions=2
             ),
             embedder=embedder,
-        ).service,
+        ),
         maintenance=MaintenancePolicy(background=False, dream_after_writes=10000),
     )
     return runtime, embedder

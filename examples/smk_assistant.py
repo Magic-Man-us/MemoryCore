@@ -2,6 +2,7 @@
 
 The former SMK implementation and fixed taxonomy have been removed.
 """
+
 import asyncio
 
 from typed_memory import main
