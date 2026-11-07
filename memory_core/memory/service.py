@@ -379,6 +379,18 @@ class MemoryService:
 
         return await asyncio.to_thread(run)
 
+    async def forget(self, memory_id: str, *, owner_id: str) -> bool:
+        """Hard-delete a record and every stored copy. Host-only; not a tool operation."""
+
+        def run() -> bool:
+            with (
+                self._owner_lock(owner_id),
+                self.store.transaction(owner_id) as session,
+            ):
+                return self.store.forget(session, owner_id, memory_id)
+
+        return await asyncio.to_thread(run)
+
     async def resolve_prefs(
         self, context: TaskContext, *, owner_id: str
     ) -> PreferencesResponse:

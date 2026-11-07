@@ -91,6 +91,12 @@ class OwnerCache:
             self.memories.bind(session, owner)
         if self.generation == generation:
             return
+        # Before new rows, so a record re-created after being forgotten survives.
+        for (uid,) in session.execute(
+            text("SELECT id FROM memory_forgotten WHERE owner=:o AND generation>:g"),
+            {"o": owner, "g": self.generation},
+        ):
+            self.discard(uid)
         rows = session.execute(
             text(
                 """SELECT payload,embedding,generation FROM memories_v1 WHERE owner=:o AND generation>:g

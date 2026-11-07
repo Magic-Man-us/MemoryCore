@@ -129,6 +129,9 @@ path persists across restarts. Queries automatically hydrate changed records int
 indexes. Writes use SQLite transactions and generation/revision
 checks, including when multiple service instances share the database.
 
+`MemoryService.forget(memory_id, owner_id=...)` hard-deletes a record and every stored copy
+(archives, dream plans, the HNSW snapshot). It is a host call, not a tool operation.
+
 ## Measured performance
 
 A local synthetic run with **50,000 records and 384-dimensional vectors**, using 30 warm
