@@ -64,6 +64,15 @@ def apply_reconciliation(
         if isinstance(decision, (AttachEvidence, Supersede, FlagConflict)):
             if target.kind != memory.kind or target.scope != memory.scope:
                 raise SchemaError("merge/supersede requires the same kind and scope")
+            if (
+                isinstance(decision, Supersede)
+                and isinstance(memory, PreferenceMemory)
+                and target.explicit
+                and not memory.explicit
+            ):
+                raise SchemaError(
+                    "an inferred preference cannot supersede an explicit one; flag a conflict"
+                )
             if isinstance(memory, PreferenceMemory) and (
                 target.preference_key != memory.preference_key
                 or target.applicability != memory.applicability

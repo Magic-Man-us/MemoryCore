@@ -554,7 +554,8 @@ async def test_dream_cursor_visits_records_with_equal_generations(service):
 
 
 async def test_dream_generated_replacement_and_failure_rollback(service):
-    await remember(service, preference(id="source"))
+    # Dreams may rewrite inferred rules; explicit ones are guarded separately.
+    await remember(service, preference(id="source", explicit=False))
 
     async def planner(groups):
         return {
@@ -643,7 +644,8 @@ async def test_boolean_and_numeric_preference_values_are_not_duplicates(service)
 
 
 async def test_dream_multi_change_failure_rolls_back_earlier_change(service):
-    await remember(service, preference(id="source"))
+    # Dreams may rewrite inferred rules; explicit ones are guarded separately.
+    await remember(service, preference(id="source", explicit=False))
 
     async def planner(groups):
         return {
@@ -839,3 +841,71 @@ async def test_dream_finds_exact_duplicates_without_semantic_hits(service):
     assert len(result.effective) == 1
     assert result.effective[0].source_refs == ["one", "two"]
     assert result.effective[0].updated_at > second.memory.updated_at
+
+
+async def test_tool_callers_cannot_assert_explicit_preferences(service):
+    from memory_core.runtime.tools import MemoryTools
+
+    tools = MemoryTools(service, owner_id="alice")
+    result = await tools.invoke(
+        {
+            "operation": "remember",
+            "embedding": V,
+            "memory": preference().model_dump(mode="json"),
+        }
+    )
+    assert result["memory"]["explicit"] is False
+    # Host code calling the service directly keeps trusted provenance.
+    direct = await remember(service, preference(value="pip", preference_key="other"))
+    assert direct.memory.explicit is True
+
+
+async def test_inferred_preference_cannot_supersede_explicit(service):
+    first = await remember(service, preference())
+    with pytest.raises(SchemaError, match="inferred preference cannot supersede"):
+        await remember(
+            service,
+            preference(value="pip", explicit=False),
+            decision=Supersede(target_id=first.memory.id, expected_revision=1),
+            expected_generation=first.generation,
+        )
+    flagged = await remember(
+        service,
+        preference(value="pip", explicit=False),
+        decision=FlagConflict(target_id=first.memory.id, expected_revision=1),
+        expected_generation=first.generation,
+    )
+    assert flagged.memory.explicit is False
+    resolved = await service.resolve_prefs(
+        TaskContext(task_id="x", attributes={"languages": ["python"]}),
+        owner_id="alice",
+    )
+    assert not resolved.effective
+    (conflict,) = resolved.conflicts
+    assert sorted(m.value for m in conflict.memories) == ["pip", "uv"]
+
+
+async def test_dream_replacement_cannot_supersede_explicit_preference(service):
+    from memory_core.memory.models import DreamChange, DreamProposal
+
+    first = await remember(service, preference())
+
+    async def planner(groups):
+        return DreamProposal(
+            changes=[
+                DreamChange(
+                    memory=preference(value="pip"),
+                    decision=Supersede(target_id=first.memory.id, expected_revision=1),
+                )
+            ]
+        )
+
+    service.dream_planner = planner
+    plan = await service.dream(owner_id="alice")
+    with pytest.raises(SchemaError, match="inferred preference cannot supersede"):
+        await service.apply_dream(plan.plan.id, owner_id="alice")
+    resolved = await service.resolve_prefs(
+        TaskContext(task_id="x", attributes={"languages": ["python"]}),
+        owner_id="alice",
+    )
+    assert [m.value for m in resolved.effective] == ["uv"]

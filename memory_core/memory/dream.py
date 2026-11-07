@@ -20,6 +20,7 @@ from .models import (
     DreamProposal,
     DreamResponse,
     MemoryHit,
+    PreferenceMemory,
     Status,
 )
 from .reconciliation import apply_reconciliation, equivalent
@@ -313,6 +314,10 @@ async def apply(service, owner, plan_id, *, on_commit=None, _advance_cursor=True
                             raise SchemaError(
                                 "dream replacement must be a new active record"
                             )
+                        # Planner output is generated, never user-stated: it cannot
+                        # carry explicit provenance (or supersede an explicit rule).
+                        if isinstance(memory, PreferenceMemory) and memory.explicit:
+                            memory = memory.model_copy(update={"explicit": False})
                         apply_reconciliation(
                             service,
                             session,
