@@ -59,13 +59,14 @@ asyncio.run(main())
 ```
 
 `REQUEST_ADAPTER` parses the discriminated operation union; `RESPONSE_ADAPTER` handles
-responses. HTTP, MCP, or SDK wrappers can all call `system.call(request, owner_id=...)`.
-The package provides the shared service, not a running HTTP/MCP server.
+responses. HTTP, MCP, or SDK wrappers can all call `memory.call(request, owner_id=...)`.
+`python -m memory_core.mcpapp --factory module:function --owner ID` runs a local stdio MCP
+server; there is no HTTP server.
 
 | Operation | Behavior |
 |---|---|
 | `remember` | Find neighbors, reconcile, persist atomically |
-| `recall` | Filter authorized records, combine semantic and keyword candidates, return top-k |
+| `recall` | Filter authorized, currently valid records, combine semantic and keyword candidates, return top-k |
 | `resolve_prefs` | Return all applicable active rules and explicit conflicts |
 | `prepare_task_context` | Resolve preferences and issue a task-bound context receipt |
 | `describe_schema` | Discover request/memory schemas and registered fields |

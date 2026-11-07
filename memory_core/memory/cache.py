@@ -68,6 +68,8 @@ class OwnerCache:
         self.preference_terms = defaultdict(set)
         self.preference_fields = {}
         self.unconditional_preferences = set()
+        # Only records with a validity bound; unbounded records are always eligible.
+        self.windows = {}
 
     def sync(self, session, owner, generation):
         if isinstance(self.memories, Payloads):
@@ -121,6 +123,8 @@ class OwnerCache:
                 terms,
             )
             self._index_content(memory)
+            if memory.valid_from is not None or memory.valid_until is not None:
+                self.windows[memory.id] = (memory.valid_from, memory.valid_until)
             self.metadata.upsert(
                 memory.id,
                 {**memory.metadata, "kind": memory.kind, "status": memory.status.value},
@@ -168,10 +172,30 @@ class OwnerCache:
                 self.preference_terms[term].discard(uid)
                 if not self.preference_terms[term]:
                     del self.preference_terms[term]
+        self.windows.pop(uid, None)
         self.metadata.remove(uid)
         if uid in self.memories:
             del self.memories[uid]
         self.vectors.remove(uid)
+
+    def next_boundary(self, after):
+        """Earliest validity bound later than ``after``, or None when none is pending."""
+        return min(
+            (
+                bound
+                for window in self.windows.values()
+                for bound in window
+                if bound is not None and bound > after
+            ),
+            default=None,
+        )
+
+    def outside_window(self, at):
+        return {
+            uid
+            for uid, (start, end) in self.windows.items()
+            if (start is not None and at < start) or (end is not None and at >= end)
+        }
 
     @staticmethod
     def key(memory):

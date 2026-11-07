@@ -1,6 +1,7 @@
 """Explicit historical recall streams retained records without growing the hot cache."""
 
 import zlib
+from datetime import UTC, datetime
 from heapq import nsmallest
 
 from sqlalchemy import text
@@ -18,6 +19,7 @@ def recall_history(service, session, owner, request, vector, registry):
         ),
         {"o": owner},
     )
+    at = request.as_of or datetime.now(UTC)
     best = []
     while batch := rows.fetchmany(256):
         cache = OwnerCache(
@@ -29,6 +31,7 @@ def recall_history(service, session, owner, request, vector, registry):
         ids = cache.eligible(request.project_id, active=False) & set.union(
             set(), *(cache.by_status[status] for status in request.statuses)
         )
+        ids -= cache.outside_window(at)
         if request.filter is not None:
             ids = cache.metadata.select(request.filter, registry, ids)
         best.extend(

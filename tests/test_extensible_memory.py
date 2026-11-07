@@ -1,6 +1,7 @@
 """Behavior tests for the extensible local memory service and automatic context hook."""
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from memory_core._native import PyVectorIndex
@@ -849,3 +850,83 @@ async def test_dream_replacement_cannot_supersede_explicit_preference(service):
         owner_id="alice",
     )
     assert [m.value for m in resolved.effective] == ["uv"]
+
+
+def observation(uid, **window):
+    return ObservationMemory(
+        id=uid, summary=f"Fact {uid}", observation=f"Fact {uid}", **window
+    )
+
+
+async def test_validity_window_bounds_recall_and_as_of(service):
+    now = datetime.now(UTC)
+    day = timedelta(days=1)
+    await remember(service, observation("current"))
+    await remember(service, observation("expired", valid_until=now - day))
+    await remember(service, observation("future", valid_from=now + day))
+    await remember(
+        service, observation("window", valid_from=now - day, valid_until=now + day)
+    )
+
+    def ids(response):
+        return {hit.memory.id for hit in response.hits}
+
+    assert ids(await recall(service)) == {"current", "window"}
+    assert ids(await recall(service, as_of=now + 2 * day)) == {"current", "future"}
+    assert ids(await recall(service, as_of=now - 2 * day)) == {"current", "expired"}
+
+
+async def test_expired_preference_is_not_resolved(service):
+    past = datetime.now(UTC) - timedelta(days=1)
+    await remember(service, preference(preference_key="old.rule", valid_until=past))
+    await remember(service, preference())
+    resolved = await service.resolve_prefs(
+        TaskContext(task_id="x", attributes={"languages": ["python"]}),
+        owner_id="alice",
+    )
+    assert [m.preference_key for m in resolved.effective] == ["python.package_manager"]
+    assert not resolved.conflicts
+
+
+def test_validity_window_must_be_ordered_and_aware():
+    now = datetime.now(UTC)
+    with pytest.raises(ValidationError, match="valid_until must be after valid_from"):
+        observation("bad", valid_from=now, valid_until=now)
+    with pytest.raises(ValidationError):
+        observation("naive", valid_until=datetime(2030, 1, 1))
+
+
+async def test_context_receipt_expires_at_next_validity_boundary(service, monkeypatch):
+    from memory_core.memory import service as service_module
+
+    now = datetime.now(UTC)
+    clock = [now]
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return clock[0]
+
+    monkeypatch.setattr(service_module, "datetime", Clock)
+    await remember(
+        service,
+        preference(preference_key="later.rule", valid_from=now + timedelta(hours=1)),
+    )
+    context = TaskContext(task_id="t", attributes={"languages": ["python"]})
+    prepared = await service.prepare_task_context(context, owner_id="alice")
+    assert not prepared.preferences.effective
+    await service.validate_context(prepared.receipt, context, owner_id="alice")
+    clock[0] = now + timedelta(hours=2)
+    with pytest.raises(ContextRequiredError):
+        await service.validate_context(prepared.receipt, context, owner_id="alice")
+
+
+def test_validity_window_orders_instants_across_dst_fold():
+    from zoneinfo import ZoneInfo
+
+    new_york = ZoneInfo("America/New_York")
+    first = datetime(2026, 11, 1, 1, 30, tzinfo=new_york, fold=0)
+    second = datetime(2026, 11, 1, 1, 30, tzinfo=new_york, fold=1)
+    memory = observation("fold", valid_from=first, valid_until=second)
+    assert memory.valid_until - memory.valid_from == timedelta(hours=1)
+    assert memory.valid_from.tzinfo is UTC

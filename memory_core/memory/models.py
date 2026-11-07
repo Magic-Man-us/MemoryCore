@@ -8,6 +8,8 @@ from typing import Annotated, Literal
 from uuid import uuid4
 
 from pydantic import (
+    AfterValidator,
+    AwareDatetime,
     BaseModel,
     ConfigDict,
     Field,
@@ -20,6 +22,15 @@ Identifier = Annotated[
     str, Field(min_length=1, max_length=128, pattern=r"^[a-z][a-z0-9_.-]*$")
 ]
 Nonempty = Annotated[str, Field(min_length=1, max_length=4096)]
+
+
+def _to_utc(value: datetime) -> datetime:
+    return value.astimezone(UTC)
+
+
+# Normalized to UTC so ordering compares instants: datetimes sharing a tzinfo compare
+# by wall clock and ignore `fold` across a daylight-saving transition.
+UtcDatetime = Annotated[AwareDatetime, AfterValidator(_to_utc)]
 Scalar = str | bool | int | float
 MetadataValue = Scalar | list[str]
 
@@ -73,6 +84,20 @@ class MemoryBase(Model):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     revision: int = Field(default=1, ge=1)
     supersedes_id: str | None = None
+    # Validity window: unset bounds mean always valid. Recall and preference
+    # resolution skip records outside it; supersession history stays in `status`.
+    valid_from: UtcDatetime | None = None
+    valid_until: UtcDatetime | None = None
+
+    @model_validator(mode="after")
+    def validity_window(self):
+        if (
+            self.valid_from is not None
+            and self.valid_until is not None
+            and self.valid_until <= self.valid_from
+        ):
+            raise ValueError("valid_until must be after valid_from")
+        return self
 
 
 class PreferenceMemory(MemoryBase):
@@ -253,6 +278,7 @@ class RecallRequest(Model):
     )
     limit: int = Field(default=10, ge=1, le=100)
     embedding: list[float] | None = None
+    as_of: UtcDatetime | None = None
 
 
 class ResolvePreferencesRequest(Model):

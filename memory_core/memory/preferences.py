@@ -13,10 +13,12 @@ from .models import (
 )
 
 
-def resolve_preferences(cache, registry, generation, context):
+def resolve_preferences(cache, registry, generation, context, at):
     attributes = registry.normalize(context.attributes)
     groups = defaultdict(list)
-    ids = cache.matching_preferences(attributes, context.project_id)
+    ids = cache.matching_preferences(
+        attributes, context.project_id
+    ) - cache.outside_window(at)
     for uid in sorted(ids):
         memory = cache.memories[uid]
         groups[memory.preference_key].append(memory)
