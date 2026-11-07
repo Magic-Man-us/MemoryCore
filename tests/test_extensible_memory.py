@@ -894,3 +894,39 @@ def test_validity_window_must_be_ordered_and_aware():
         observation("bad", valid_from=now, valid_until=now)
     with pytest.raises(ValidationError):
         observation("naive", valid_until=datetime(2030, 1, 1))
+
+
+async def test_context_receipt_expires_at_next_validity_boundary(service, monkeypatch):
+    from memory_core.memory import service as service_module
+
+    now = datetime.now(UTC)
+    clock = [now]
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return clock[0]
+
+    monkeypatch.setattr(service_module, "datetime", Clock)
+    await remember(
+        service,
+        preference(preference_key="later.rule", valid_from=now + timedelta(hours=1)),
+    )
+    context = TaskContext(task_id="t", attributes={"languages": ["python"]})
+    prepared = await service.prepare_task_context(context, owner_id="alice")
+    assert not prepared.preferences.effective
+    await service.validate_context(prepared.receipt, context, owner_id="alice")
+    clock[0] = now + timedelta(hours=2)
+    with pytest.raises(ContextRequiredError):
+        await service.validate_context(prepared.receipt, context, owner_id="alice")
+
+
+def test_validity_window_orders_instants_across_dst_fold():
+    from zoneinfo import ZoneInfo
+
+    new_york = ZoneInfo("America/New_York")
+    first = datetime(2026, 11, 1, 1, 30, tzinfo=new_york, fold=0)
+    second = datetime(2026, 11, 1, 1, 30, tzinfo=new_york, fold=1)
+    memory = observation("fold", valid_from=first, valid_until=second)
+    assert memory.valid_until - memory.valid_from == timedelta(hours=1)
+    assert memory.valid_from.tzinfo is UTC

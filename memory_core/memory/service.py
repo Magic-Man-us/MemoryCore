@@ -319,7 +319,7 @@ class MemoryService:
             ):
                 cache, registry, state = self._snapshot(session, owner_id)
                 return resolve_preferences(
-                    cache, registry, state["generation"], context
+                    cache, registry, state["generation"], context, datetime.now(UTC)
                 )
 
         return await asyncio.to_thread(run)
@@ -451,8 +451,9 @@ class MemoryService:
                 ) as session,
             ):
                 cache, registry, state = self._snapshot(session, owner_id)
+                now = datetime.now(UTC)
                 preferences = resolve_preferences(
-                    cache, registry, state["generation"], context
+                    cache, registry, state["generation"], context, now
                 )
                 supporting = (
                     []
@@ -466,7 +467,7 @@ class MemoryService:
                             query,
                             vector,
                             cache.eligible(context.project_id)
-                            - cache.outside_window(datetime.now(UTC)),
+                            - cache.outside_window(now),
                             limit,
                         )
                     ]
@@ -474,10 +475,13 @@ class MemoryService:
                 receipt = secrets.token_urlsafe(24)
                 # One current receipt per owner/task; bounded retention per service.
                 with self._cache_lock:
+                    # The context goes stale at the next validity bound as well as
+                    # on the next write.
                     self._receipts[(owner_id, context.task_id)] = (
                         receipt,
                         context.model_dump_json(),
                         state["generation"],
+                        cache.next_boundary(now),
                     )
                     if len(self._receipts) > 1024:
                         del self._receipts[next(iter(self._receipts))]
@@ -505,9 +509,12 @@ class MemoryService:
                     self.store.state(session, owner_id)["generation"],
                 )
                 with self._cache_lock:
-                    matches = (
-                        self._receipts.get((owner_id, context.task_id)) == expected
-                    )
+                    stored = self._receipts.get((owner_id, context.task_id))
+                matches = (
+                    stored is not None
+                    and stored[:3] == expected
+                    and (stored[3] is None or datetime.now(UTC) < stored[3])
+                )
                 if not matches:
                     raise ContextRequiredError(
                         "missing/stale context: prepare_task_context before editing"

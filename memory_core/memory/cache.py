@@ -178,6 +178,18 @@ class OwnerCache:
             del self.memories[uid]
         self.vectors.remove(uid)
 
+    def next_boundary(self, after):
+        """Earliest validity bound later than ``after``, or None when none is pending."""
+        return min(
+            (
+                bound
+                for window in self.windows.values()
+                for bound in window
+                if bound is not None and bound > after
+            ),
+            default=None,
+        )
+
     def outside_window(self, at):
         return {
             uid
