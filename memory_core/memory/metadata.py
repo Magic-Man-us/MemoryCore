@@ -52,16 +52,19 @@ class Registry:
 
     @staticmethod
     def check_value(field: FieldDefinition, value: MetadataValue) -> None:
-        valid = {
-            FieldType.KEYWORD: lambda: type(value) is str,
-            FieldType.KEYWORDS: lambda: (
-                type(value) is list and all(type(x) is str for x in value)
-            ),
-            FieldType.NUMBER: lambda: (
-                type(value) in (int, float) and math.isfinite(value)
-            ),
-            FieldType.BOOLEAN: lambda: type(value) is bool,
-        }[field.type]()
+        match field.type:
+            case FieldType.KEYWORD:
+                valid = type(value) is str
+            case FieldType.KEYWORDS:
+                valid = isinstance(value, list) and all(type(x) is str for x in value)
+            case FieldType.NUMBER:
+                valid = (
+                    isinstance(value, (int, float))
+                    and type(value) is not bool
+                    and math.isfinite(value)
+                )
+            case FieldType.BOOLEAN:
+                valid = type(value) is bool
         if not valid:
             raise SchemaError(f"{field.name} requires {field.type}")
 

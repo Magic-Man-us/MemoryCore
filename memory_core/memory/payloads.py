@@ -34,6 +34,8 @@ class Payloads(MutableMapping):
         if key in self.resident:
             self.resident.move_to_end(key)
             return self.resident[key]
+        # bind() runs at the start of every snapshot, before any read.
+        assert self.session is not None
         row = self.session.execute(
             text("SELECT payload FROM memories_v1 WHERE owner=:o AND id=:id"),
             {"o": self.owner, "id": key},

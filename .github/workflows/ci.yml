@@ -73,6 +73,9 @@ jobs:
       - name: Tests
         run: uv run --extra dev --extra mcp --extra claude --extra ann pytest -q
 
+      - name: Type check
+        run: uv run --extra dev --extra mcp --extra claude --extra ann pyright
+
       - name: Examples
         working-directory: ${{ runner.temp }}
         run: |

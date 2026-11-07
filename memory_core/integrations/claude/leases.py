@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from sqlalchemy import text
 
 from .models import AgentRunConflict
 
+if TYPE_CHECKING:
+    from memory_core.runtime.core import MemoryCore
+
 
 @dataclass(frozen=True, slots=True)
 class RunLease:
-    memory: object
+    memory: MemoryCore
     owner: str
     task_id: str
     token: str

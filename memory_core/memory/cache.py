@@ -146,12 +146,11 @@ class OwnerCache:
             self.by_project[memory.scope.project_id].add(memory.id)
             for token in tokens(memory.summary):
                 self.lexical[token].add(memory.id)
-            if embedding and (
-                row_generation is None or row_generation > self.restored_generation
-            ):
-                self.vectors.upsert(memory.id, decode_embedding(embedding))
-            elif not embedding:
+            vector = decode_embedding(embedding)
+            if vector is None:
                 self.vectors.remove(memory.id)
+            elif row_generation is None or row_generation > self.restored_generation:
+                self.vectors.upsert(memory.id, vector)
 
     def _index_content(self, memory):
         if memory.status == Status.ACTIVE:
