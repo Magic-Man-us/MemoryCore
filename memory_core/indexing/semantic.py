@@ -4,15 +4,21 @@ from __future__ import annotations
 
 import hashlib
 import tempfile
+from enum import StrEnum
 from pathlib import Path
 from threading import RLock
-from typing import Literal, Protocol
+from typing import Protocol
 
 from pydantic import BaseModel, Field
 
 
+class IndexBackend(StrEnum):
+    EXACT = "exact"
+    HNSW = "hnsw"
+
+
 class IndexPolicy(BaseModel):
-    backend: Literal["exact", "hnsw"] = "exact"
+    backend: IndexBackend = IndexBackend.EXACT
     exact_threshold: int = Field(default=1000, ge=1)
     ef_search: int = Field(default=256, ge=1)
     ef_construction: int = Field(default=200, ge=1)

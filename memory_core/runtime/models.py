@@ -27,6 +27,18 @@ from memory_core.memory.models import (
 )
 
 
+class KnowledgeStatus(StrEnum):
+    RESOLVED = "resolved"
+    NEEDS_USER_INPUT = "needs_user_input"
+    UNRESOLVED = "unresolved"
+
+
+class OutcomeStatus(StrEnum):
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
 class Model(MemoryModel):
     model_config = ConfigDict(revalidate_instances="always")
 
@@ -44,7 +56,7 @@ class Finding(Model):
 
 
 class TaskOutcome(Model):
-    status: Literal["succeeded", "failed", "cancelled"]
+    status: OutcomeStatus
     summary: Nonempty
     evidence: list[Evidence] = Field(default_factory=list, max_length=32)
 
@@ -57,18 +69,18 @@ class KnowledgeGap(Model):
 
 
 class ResolvedKnowledge(Model):
-    status: Literal["resolved"] = "resolved"
+    status: Literal[KnowledgeStatus.RESOLVED] = KnowledgeStatus.RESOLVED
     answer: Nonempty
     evidence: list[Evidence] = Field(min_length=1, max_length=32)
 
 
 class NeedsUserInput(Model):
-    status: Literal["needs_user_input"] = "needs_user_input"
+    status: Literal[KnowledgeStatus.NEEDS_USER_INPUT] = KnowledgeStatus.NEEDS_USER_INPUT
     question: Nonempty
 
 
 class UnresolvedKnowledge(Model):
-    status: Literal["unresolved"] = "unresolved"
+    status: Literal[KnowledgeStatus.UNRESOLVED] = KnowledgeStatus.UNRESOLVED
     reason: Nonempty
 
 
@@ -113,6 +125,32 @@ class MaintenancePolicy(Model):
     apply_semantic_changes: bool = False
 
 
+class RuntimeOperation(StrEnum):
+    BEGIN_TASK = "begin_task"
+    PREPARE_TASK = "prepare_task"
+    REQUIRE_KNOWLEDGE = "require_knowledge"
+    RECORD_FINDING = "record_finding"
+    COMPLETE_TASK = "complete_task"
+    MAINTENANCE_STATUS = "maintenance_status"
+    REVIEW_JOB = "review_job"
+    RETRY_JOB = "retry_job"
+    TASK = "task"
+    CAPTURE = "capture"
+    KNOWLEDGE = "knowledge"
+
+
+class JobKind(StrEnum):
+    CAPTURE = "capture"
+    DREAM = "dream"
+
+
+class JobResultKind(StrEnum):
+    CAPTURE_APPLIED = "capture_applied"
+    CAPTURE_PROPOSAL = "capture_proposal"
+    DREAM_PROPOSAL = "dream_proposal"
+    DREAM_APPLIED = "dream_applied"
+
+
 class JobStatus(StrEnum):
     PENDING = "pending"
     RUNNING = "running"
@@ -123,13 +161,13 @@ class JobStatus(StrEnum):
 
 
 class CaptureApplied(Model):
-    kind: Literal["capture_applied"] = "capture_applied"
+    kind: Literal[JobResultKind.CAPTURE_APPLIED] = JobResultKind.CAPTURE_APPLIED
     memory_id: str
     decision: Reconciliation
 
 
 class CaptureProposal(Model):
-    kind: Literal["capture_proposal"] = "capture_proposal"
+    kind: Literal[JobResultKind.CAPTURE_PROPOSAL] = JobResultKind.CAPTURE_PROPOSAL
     incoming: Memory
     neighbors: list[MemoryHit]
     decision: Reconciliation
@@ -138,7 +176,7 @@ class CaptureProposal(Model):
 
 
 class DreamReview(Model):
-    kind: Literal["dream_proposal"] = "dream_proposal"
+    kind: Literal[JobResultKind.DREAM_PROPOSAL] = JobResultKind.DREAM_PROPOSAL
     plan_id: str
     plan: DreamPlan
     generation: int
@@ -146,7 +184,7 @@ class DreamReview(Model):
 
 
 class DreamApplied(Model):
-    kind: Literal["dream_applied"] = "dream_applied"
+    kind: Literal[JobResultKind.DREAM_APPLIED] = JobResultKind.DREAM_APPLIED
     plan_id: str
     applied: bool
     recommendations: list[str]
@@ -161,7 +199,7 @@ JobResult = Annotated[
 class JobView(Model):
     id: str
     task_id: str | None
-    kind: Literal["capture", "dream"]
+    kind: JobKind
     status: JobStatus
     attempts: int
     error: str | None
@@ -169,69 +207,75 @@ class JobView(Model):
 
 
 class BeginTaskRequest(Model):
-    operation: Literal["begin_task"] = "begin_task"
+    operation: Literal[RuntimeOperation.BEGIN_TASK] = RuntimeOperation.BEGIN_TASK
     context: TaskContext
     objective: Nonempty
 
 
 class PrepareTaskRequest(Model):
-    operation: Literal["prepare_task"] = "prepare_task"
+    operation: Literal[RuntimeOperation.PREPARE_TASK] = RuntimeOperation.PREPARE_TASK
     task_id: Nonempty
     guard: bool = False
 
 
 class PreparedTask(ContextResponse):
-    operation: Literal["prepare_task"] = "prepare_task"
+    operation: Literal[RuntimeOperation.PREPARE_TASK] = RuntimeOperation.PREPARE_TASK
     context: TaskContext
     objective: Nonempty
     knowledge: dict[str, KnowledgeResult]
 
 
 class RequireKnowledgeRequest(Model):
-    operation: Literal["require_knowledge"] = "require_knowledge"
+    operation: Literal[RuntimeOperation.REQUIRE_KNOWLEDGE] = (
+        RuntimeOperation.REQUIRE_KNOWLEDGE
+    )
     task_id: Nonempty
     gap: KnowledgeGap
 
 
 class RecordFindingRequest(Model):
-    operation: Literal["record_finding"] = "record_finding"
+    operation: Literal[RuntimeOperation.RECORD_FINDING] = (
+        RuntimeOperation.RECORD_FINDING
+    )
     task_id: Nonempty
     event_id: Nonempty
     finding: Finding
 
 
 class CompleteTaskRequest(Model):
-    operation: Literal["complete_task"] = "complete_task"
+    operation: Literal[RuntimeOperation.COMPLETE_TASK] = RuntimeOperation.COMPLETE_TASK
     task_id: Nonempty
     outcome: TaskOutcome
     findings: list[Finding] = Field(default_factory=list, max_length=32)
 
 
 class MaintenanceStatusRequest(Model):
-    operation: Literal["maintenance_status"] = "maintenance_status"
+    operation: Literal[RuntimeOperation.MAINTENANCE_STATUS] = (
+        RuntimeOperation.MAINTENANCE_STATUS
+    )
     status: JobStatus | None = None
     limit: int = Field(default=50, ge=1, le=100)
     offset: int = Field(default=0, ge=0)
 
 
 class ReviewJobRequest(Model):
-    operation: Literal["review_job"] = "review_job"
+    operation: Literal[RuntimeOperation.REVIEW_JOB] = RuntimeOperation.REVIEW_JOB
     job_id: Nonempty
     accept: bool
 
 
 class RetryJobRequest(Model):
-    operation: Literal["retry_job"] = "retry_job"
+    operation: Literal[RuntimeOperation.RETRY_JOB] = RuntimeOperation.RETRY_JOB
     job_id: Nonempty
 
 
 class RetryResponse(Model):
-    operation: Literal["retry_job"] = "retry_job"
+    operation: Literal[RuntimeOperation.RETRY_JOB] = RuntimeOperation.RETRY_JOB
     job: JobView
 
 
 class TaskResponse(Model):
-    operation: Literal["task"] = "task"
+    operation: Literal[RuntimeOperation.TASK] = RuntimeOperation.TASK
     context: TaskContext
     objective: str
     outcome: TaskOutcome | None = None
@@ -239,24 +283,26 @@ class TaskResponse(Model):
 
 
 class CaptureResponse(Model):
-    operation: Literal["capture"] = "capture"
+    operation: Literal[RuntimeOperation.CAPTURE] = RuntimeOperation.CAPTURE
     job_ids: list[str]
 
 
 class KnowledgeResponse(Model):
-    operation: Literal["knowledge"] = "knowledge"
+    operation: Literal[RuntimeOperation.KNOWLEDGE] = RuntimeOperation.KNOWLEDGE
     result: KnowledgeResult
     capture: CaptureResponse | None = None
 
 
 class MaintenanceResponse(Model):
-    operation: Literal["maintenance_status"] = "maintenance_status"
+    operation: Literal[RuntimeOperation.MAINTENANCE_STATUS] = (
+        RuntimeOperation.MAINTENANCE_STATUS
+    )
     jobs: list[JobView]
     next_offset: int | None = None
 
 
 class ReviewResponse(Model):
-    operation: Literal["review_job"] = "review_job"
+    operation: Literal[RuntimeOperation.REVIEW_JOB] = RuntimeOperation.REVIEW_JOB
     job: JobView
 
 

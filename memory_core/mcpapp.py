@@ -13,6 +13,7 @@ import importlib
 import inspect
 from contextlib import asynccontextmanager
 from copy import deepcopy
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import Field, ValidationError
@@ -24,13 +25,17 @@ from memory_core.runtime.models import Model
 from memory_core.storage.codec import JSON_VALUE
 
 
+class ToolOperation(StrEnum):
+    FAILURE = "failure"
+
+
 class ValidationIssue(Model):
     location: list[str | int]
     reason: str
 
 
 class ToolFailure(Model):
-    operation: Literal["failure"] = "failure"
+    operation: Literal[ToolOperation.FAILURE] = ToolOperation.FAILURE
     code: str
     message: str
     issues: list[ValidationIssue] = Field(default_factory=list)

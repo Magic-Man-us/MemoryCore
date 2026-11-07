@@ -45,6 +45,51 @@ class Status(StrEnum):
     DISPUTED = "disputed"
 
 
+class ScopeKind(StrEnum):
+    USER = "user"
+    PROJECT = "project"
+
+
+class MemoryKind(StrEnum):
+    PREFERENCE = "preference"
+    DECISION = "decision"
+    OBSERVATION = "observation"
+    PROCEDURE = "procedure"
+
+
+class FilterOp(StrEnum):
+    EQ = "eq"
+    IN = "in"
+    CONTAINS_ANY = "contains_any"
+    CONTAINS_ALL = "contains_all"
+    RANGE = "range"
+    EXISTS = "exists"
+    ALL = "all"
+    ANY = "any"
+
+
+class ReconciliationAction(StrEnum):
+    CREATE = "create"
+    ATTACH_EVIDENCE = "attach_evidence"
+    SUPERSEDE = "supersede"
+    PRESERVE_EXCEPTION = "preserve_exception"
+    FLAG_CONFLICT = "flag_conflict"
+
+
+class Operation(StrEnum):
+    REMEMBER = "remember"
+    RECALL = "recall"
+    RESOLVE_PREFS = "resolve_prefs"
+    PREPARE_TASK_CONTEXT = "prepare_task_context"
+    DESCRIBE_SCHEMA = "describe_schema"
+    LIST_METADATA_FIELDS = "list_metadata_fields"
+    REGISTER_METADATA_FIELD = "register_metadata_field"
+    LIST_METADATA_VALUES = "list_metadata_values"
+    DREAM_PLAN = "dream_plan"
+    DREAM_APPLY = "dream_apply"
+    DREAM = "dream"
+
+
 class FieldType(StrEnum):
     KEYWORD = "keyword"
     KEYWORDS = "keywords"
@@ -61,7 +106,7 @@ class FieldDefinition(Model):
 
 
 class UserScope(Model):
-    kind: Literal["user"] = "user"
+    kind: Literal[ScopeKind.USER] = ScopeKind.USER
 
     @property
     def project_id(self) -> None:
@@ -70,7 +115,7 @@ class UserScope(Model):
 
 
 class ProjectScope(Model):
-    kind: Literal["project"] = "project"
+    kind: Literal[ScopeKind.PROJECT] = ScopeKind.PROJECT
     project_id: Nonempty
 
 
@@ -106,7 +151,7 @@ class MemoryBase(Model):
 
 
 class PreferenceMemory(MemoryBase):
-    kind: Literal["preference"] = "preference"
+    kind: Literal[MemoryKind.PREFERENCE] = MemoryKind.PREFERENCE
     preference_key: Identifier
     value: JsonValue
     # AND across fields, OR across each field's allowed values. Missing task fields do not match.
@@ -115,19 +160,19 @@ class PreferenceMemory(MemoryBase):
 
 
 class DecisionMemory(MemoryBase):
-    kind: Literal["decision"] = "decision"
+    kind: Literal[MemoryKind.DECISION] = MemoryKind.DECISION
     decision: Nonempty
     rationale: Nonempty
 
 
 class ObservationMemory(MemoryBase):
-    kind: Literal["observation"] = "observation"
+    kind: Literal[MemoryKind.OBSERVATION] = MemoryKind.OBSERVATION
     observation: Nonempty
     observed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class ProcedureMemory(MemoryBase):
-    kind: Literal["procedure"] = "procedure"
+    kind: Literal[MemoryKind.PROCEDURE] = MemoryKind.PROCEDURE
     trigger: Nonempty
     steps: list[Nonempty] = Field(min_length=1)
 
@@ -140,31 +185,31 @@ MEMORY_ADAPTER = TypeAdapter(Memory)
 
 
 class Eq(Model):
-    op: Literal["eq"] = "eq"
+    op: Literal[FilterOp.EQ] = FilterOp.EQ
     field: Identifier
     value: Scalar
 
 
 class In(Model):
-    op: Literal["in"] = "in"
+    op: Literal[FilterOp.IN] = FilterOp.IN
     field: Identifier
     values: list[Scalar] = Field(max_length=100)
 
 
 class ContainsAny(Model):
-    op: Literal["contains_any"] = "contains_any"
+    op: Literal[FilterOp.CONTAINS_ANY] = FilterOp.CONTAINS_ANY
     field: Identifier
     values: list[str] = Field(max_length=100)
 
 
 class ContainsAll(Model):
-    op: Literal["contains_all"] = "contains_all"
+    op: Literal[FilterOp.CONTAINS_ALL] = FilterOp.CONTAINS_ALL
     field: Identifier
     values: list[str] = Field(max_length=100)
 
 
 class Range(Model):
-    op: Literal["range"] = "range"
+    op: Literal[FilterOp.RANGE] = FilterOp.RANGE
     field: Identifier
     minimum: float | None = None
     maximum: float | None = None
@@ -183,17 +228,17 @@ class Range(Model):
 
 
 class Exists(Model):
-    op: Literal["exists"] = "exists"
+    op: Literal[FilterOp.EXISTS] = FilterOp.EXISTS
     field: Identifier
 
 
 class All(Model):
-    op: Literal["all"] = "all"
+    op: Literal[FilterOp.ALL] = FilterOp.ALL
     conditions: list[Filter] = Field(max_length=100)
 
 
 class AnyOf(Model):
-    op: Literal["any"] = "any"
+    op: Literal[FilterOp.ANY] = FilterOp.ANY
     conditions: list[Filter] = Field(max_length=100)
 
 
@@ -233,7 +278,7 @@ class TaskContext(Model):
 
 
 class Create(Model):
-    action: Literal["create"] = "create"
+    action: Literal[ReconciliationAction.CREATE] = ReconciliationAction.CREATE
 
 
 class TargetAction(Model):
@@ -242,19 +287,25 @@ class TargetAction(Model):
 
 
 class AttachEvidence(TargetAction):
-    action: Literal["attach_evidence"] = "attach_evidence"
+    action: Literal[ReconciliationAction.ATTACH_EVIDENCE] = (
+        ReconciliationAction.ATTACH_EVIDENCE
+    )
 
 
 class Supersede(TargetAction):
-    action: Literal["supersede"] = "supersede"
+    action: Literal[ReconciliationAction.SUPERSEDE] = ReconciliationAction.SUPERSEDE
 
 
 class PreserveException(TargetAction):
-    action: Literal["preserve_exception"] = "preserve_exception"
+    action: Literal[ReconciliationAction.PRESERVE_EXCEPTION] = (
+        ReconciliationAction.PRESERVE_EXCEPTION
+    )
 
 
 class FlagConflict(TargetAction):
-    action: Literal["flag_conflict"] = "flag_conflict"
+    action: Literal[ReconciliationAction.FLAG_CONFLICT] = (
+        ReconciliationAction.FLAG_CONFLICT
+    )
 
 
 Reconciliation = Annotated[
@@ -265,7 +316,7 @@ DECISION_ADAPTER = TypeAdapter(Reconciliation)
 
 
 class RememberRequest(Model):
-    operation: Literal["remember"] = "remember"
+    operation: Literal[Operation.REMEMBER] = Operation.REMEMBER
     memory: Memory
     embedding: list[float] | None = None
     decision: Reconciliation | None = None
@@ -274,7 +325,7 @@ class RememberRequest(Model):
 
 
 class RecallRequest(Model):
-    operation: Literal["recall"] = "recall"
+    operation: Literal[Operation.RECALL] = Operation.RECALL
     query: Nonempty
     project_id: Nonempty | None = None
     filter: Filter | None = None
@@ -287,34 +338,36 @@ class RecallRequest(Model):
 
 
 class ResolvePreferencesRequest(Model):
-    operation: Literal["resolve_prefs"] = "resolve_prefs"
+    operation: Literal[Operation.RESOLVE_PREFS] = Operation.RESOLVE_PREFS
     context: TaskContext
 
 
 class PrepareContextRequest(Model):
-    operation: Literal["prepare_task_context"] = "prepare_task_context"
+    operation: Literal[Operation.PREPARE_TASK_CONTEXT] = Operation.PREPARE_TASK_CONTEXT
     context: TaskContext
     query: Nonempty | None = None
     limit: int = Field(default=5, ge=1, le=100)
 
 
 class DescribeSchemaRequest(Model):
-    operation: Literal["describe_schema"] = "describe_schema"
+    operation: Literal[Operation.DESCRIBE_SCHEMA] = Operation.DESCRIBE_SCHEMA
 
 
 class ListFieldsRequest(Model):
-    operation: Literal["list_metadata_fields"] = "list_metadata_fields"
+    operation: Literal[Operation.LIST_METADATA_FIELDS] = Operation.LIST_METADATA_FIELDS
 
 
 class RegisterFieldRequest(Model):
-    operation: Literal["register_metadata_field"] = "register_metadata_field"
+    operation: Literal[Operation.REGISTER_METADATA_FIELD] = (
+        Operation.REGISTER_METADATA_FIELD
+    )
     definition: FieldDefinition
 
 
 class ListValuesRequest(Model):
     # None retains owner-wide discovery for trusted host callers.
     scope: Scope | None = None
-    operation: Literal["list_metadata_values"] = "list_metadata_values"
+    operation: Literal[Operation.LIST_METADATA_VALUES] = Operation.LIST_METADATA_VALUES
     field: Identifier
     prefix: str = ""
     offset: int = Field(default=0, ge=0)
@@ -327,13 +380,13 @@ class MemoryHit(Model):
 
 
 class DreamPlanRequest(Model):
-    operation: Literal["dream_plan"] = "dream_plan"
+    operation: Literal[Operation.DREAM_PLAN] = Operation.DREAM_PLAN
     batch_size: int = Field(default=16, ge=1, le=100)
     neighbors_per_memory: int = Field(default=8, ge=1, le=30)
 
 
 class DreamApplyRequest(Model):
-    operation: Literal["dream_apply"] = "dream_apply"
+    operation: Literal[Operation.DREAM_APPLY] = Operation.DREAM_APPLY
     plan_id: Nonempty
 
 
@@ -365,7 +418,7 @@ class DreamPlan(Model):
 
 
 class DreamResponse(Model):
-    operation: Literal["dream"] = "dream"
+    operation: Literal[Operation.DREAM] = Operation.DREAM
     plan: DreamPlan
     due: bool
 
@@ -387,7 +440,7 @@ REQUEST_ADAPTER = TypeAdapter(Request)
 
 
 class RecallResponse(Model):
-    operation: Literal["recall"] = "recall"
+    operation: Literal[Operation.RECALL] = Operation.RECALL
     hits: list[MemoryHit]
     generation: int
 
@@ -398,7 +451,7 @@ class PreferenceConflict(Model):
 
 
 class PreferencesResponse(Model):
-    operation: Literal["resolve_prefs"] = "resolve_prefs"
+    operation: Literal[Operation.RESOLVE_PREFS] = Operation.RESOLVE_PREFS
     effective: list[PreferenceMemory]
     conflicts: list[PreferenceConflict]
     complete: bool = True
@@ -406,7 +459,7 @@ class PreferencesResponse(Model):
 
 
 class RememberResponse(Model):
-    operation: Literal["remember"] = "remember"
+    operation: Literal[Operation.REMEMBER] = Operation.REMEMBER
     memory: Memory
     decision: Reconciliation
     neighbors: list[MemoryHit]
@@ -416,14 +469,14 @@ class RememberResponse(Model):
 
 
 class ContextResponse(Model):
-    operation: Literal["prepare_task_context"] = "prepare_task_context"
+    operation: Literal[Operation.PREPARE_TASK_CONTEXT] = Operation.PREPARE_TASK_CONTEXT
     preferences: PreferencesResponse
     supporting: list[MemoryHit]
     receipt: str
 
 
 class SchemaResponse(Model):
-    operation: Literal["describe_schema"] = "describe_schema"
+    operation: Literal[Operation.DESCRIBE_SCHEMA] = Operation.DESCRIBE_SCHEMA
     schema_version: Literal[1] = 1
     request_schema: dict[str, JsonValue]
     memory_schema: dict[str, JsonValue]
@@ -432,17 +485,19 @@ class SchemaResponse(Model):
 
 
 class FieldsResponse(Model):
-    operation: Literal["list_metadata_fields"] = "list_metadata_fields"
+    operation: Literal[Operation.LIST_METADATA_FIELDS] = Operation.LIST_METADATA_FIELDS
     fields: list[FieldDefinition]
 
 
 class FieldResponse(Model):
-    operation: Literal["register_metadata_field"] = "register_metadata_field"
+    operation: Literal[Operation.REGISTER_METADATA_FIELD] = (
+        Operation.REGISTER_METADATA_FIELD
+    )
     definition: FieldDefinition
 
 
 class ValuesResponse(Model):
-    operation: Literal["list_metadata_values"] = "list_metadata_values"
+    operation: Literal[Operation.LIST_METADATA_VALUES] = Operation.LIST_METADATA_VALUES
     values: list[Scalar]
     next_offset: int | None
 

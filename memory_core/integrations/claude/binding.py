@@ -14,6 +14,7 @@ from memory_core.memory.errors import (
 )
 from memory_core.memory.models import (
     ListValuesRequest,
+    Operation,
     ProjectScope,
     RecallRequest,
     UserScope,
@@ -29,6 +30,7 @@ from memory_core.runtime.models import (
     RecordFindingRequest,
     RequireKnowledgeRequest,
     ResolvedKnowledge,
+    RuntimeOperation,
     TaskRunResult,
 )
 from memory_core.runtime.tools import MemoryTools
@@ -37,13 +39,13 @@ from memory_core.storage.codec import JSON_VALUE
 # Protocol capabilities, not domain vocabulary. Lifecycle completion/review is host-only.
 OPERATIONS = frozenset(
     {
-        "describe_schema",
-        "list_metadata_fields",
-        "list_metadata_values",
-        "prepare_task",
-        "require_knowledge",
-        "record_finding",
-        "recall",
+        Operation.DESCRIBE_SCHEMA,
+        Operation.LIST_METADATA_FIELDS,
+        Operation.LIST_METADATA_VALUES,
+        RuntimeOperation.PREPARE_TASK,
+        RuntimeOperation.REQUIRE_KNOWLEDGE,
+        RuntimeOperation.RECORD_FINDING,
+        Operation.RECALL,
     }
 )
 
@@ -145,7 +147,7 @@ class TaskBinding(MemoryTools):
 
     def input_schema_for(self, operation, schema):
         schema = deepcopy(schema)
-        if operation == "recall":
+        if operation == Operation.RECALL:
             schema["properties"]["limit"]["maximum"] = self.policy.max_recall_hits
             schema["properties"]["limit"]["default"] = self.policy.max_recall_hits
         return schema
@@ -161,10 +163,10 @@ class TaskBinding(MemoryTools):
     async def invoke(self, arguments):
         if self.lease is not None:
             await asyncio.to_thread(self.lease.validate)
-        if arguments.get("operation") == "recall" and "limit" not in arguments:
+        if arguments.get("operation") == Operation.RECALL and "limit" not in arguments:
             arguments = {**arguments, "limit": self.policy.max_recall_hits}
         if (
-            arguments.get("operation") == "list_metadata_values"
+            arguments.get("operation") == Operation.LIST_METADATA_VALUES
             and "scope" not in arguments
         ):
             arguments = {
@@ -225,7 +227,11 @@ class TaskBinding(MemoryTools):
     def sdk_server(self):
         bindings = {
             name: {"task_id": self.context.task_id}
-            for name in ("prepare_task", "require_knowledge", "record_finding")
+            for name in (
+                RuntimeOperation.PREPARE_TASK,
+                RuntimeOperation.REQUIRE_KNOWLEDGE,
+                RuntimeOperation.RECORD_FINDING,
+            )
         }
         bindings["recall"] = {"project_id": self.context.project_id}
         bindings["list_metadata_values"] = {

@@ -14,6 +14,7 @@ from weakref import WeakValueDictionary
 from pydantic import BaseModel
 from sqlalchemy import text
 
+from memory_core.indexing.semantic import IndexBackend
 from memory_core.storage.database import Database
 
 from .cache import OwnerCache
@@ -114,7 +115,7 @@ class MemoryService:
                 self.retrieval_policy,
                 index_policy=self.index_policy,
             )
-            if self.index_policy.backend == "hnsw":
+            if self.index_policy.backend == IndexBackend.HNSW:
                 saved = session.execute(
                     text(
                         "SELECT identity,generation,manifest,graph FROM memory_vector_snapshots WHERE owner=:o"
@@ -155,7 +156,7 @@ class MemoryService:
 
     async def checkpoint_indexes(self, *, force=False):
         def save():
-            if self.index_policy.backend != "hnsw":
+            if self.index_policy.backend != IndexBackend.HNSW:
                 return 0
             saved = 0
             with self._cache_lock:

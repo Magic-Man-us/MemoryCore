@@ -5,13 +5,15 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 
-from .models import REQUEST_ADAPTER, RESPONSE_ADAPTER
+from memory_core.memory.models import Operation
+
+from .models import REQUEST_ADAPTER, RESPONSE_ADAPTER, RuntimeOperation
 
 
 @dataclass(frozen=True, slots=True)
 class ToolSpec:
     description: str
-    response: str
+    response: Operation | RuntimeOperation
     read_only: bool = False
     destructive: bool = False
     idempotent: bool = False
@@ -20,98 +22,98 @@ class ToolSpec:
 
 # These are protocol operations, not a taxonomy of memory topics or user activities.
 SPECS = {
-    "describe_schema": ToolSpec(
+    Operation.DESCRIBE_SCHEMA: ToolSpec(
         "Discover memory fields and supported typed operations before using unfamiliar metadata.",
-        "describe_schema",
+        Operation.DESCRIBE_SCHEMA,
         read_only=True,
         idempotent=True,
     ),
-    "list_metadata_fields": ToolSpec(
+    Operation.LIST_METADATA_FIELDS: ToolSpec(
         "List registered metadata fields and aliases for this owner.",
-        "list_metadata_fields",
+        Operation.LIST_METADATA_FIELDS,
         read_only=True,
         idempotent=True,
     ),
-    "list_metadata_values": ToolSpec(
+    Operation.LIST_METADATA_VALUES: ToolSpec(
         "Page through known values for a registered field.",
-        "list_metadata_values",
+        Operation.LIST_METADATA_VALUES,
         read_only=True,
         idempotent=True,
     ),
-    "register_metadata_field": ToolSpec(
+    Operation.REGISTER_METADATA_FIELD: ToolSpec(
         "Register a typed metadata field or alias before recording new attributes.",
-        "register_metadata_field",
+        Operation.REGISTER_METADATA_FIELD,
     ),
-    "recall": ToolSpec(
+    Operation.RECALL: ToolSpec(
         "Retrieve a bounded set of scoped memories relevant to a query; similarity is not proof of correctness.",
-        "recall",
+        Operation.RECALL,
         read_only=True,
         idempotent=True,
     ),
-    "resolve_prefs": ToolSpec(
+    Operation.RESOLVE_PREFS: ToolSpec(
         "Resolve all applicable preferences, including conflicts, independently of semantic top-k.",
-        "resolve_prefs",
+        Operation.RESOLVE_PREFS,
         read_only=True,
         idempotent=True,
     ),
-    "prepare_task_context": ToolSpec(
+    Operation.PREPARE_TASK_CONTEXT: ToolSpec(
         "Prepare preferences and supporting memories from explicit context. For a durable task use prepare_task.",
-        "prepare_task_context",
+        Operation.PREPARE_TASK_CONTEXT,
     ),
-    "remember": ToolSpec(
+    Operation.REMEMBER: ToolSpec(
         "Immediately reconcile and store an explicit memory. For deferred task findings use record_finding.",
-        "remember",
+        Operation.REMEMBER,
         destructive=True,
     ),
-    "dream_plan": ToolSpec(
+    Operation.DREAM_PLAN: ToolSpec(
         "Prepare and persist a bounded consolidation proposal without applying changes.",
-        "dream",
+        Operation.DREAM,
         open_world=True,
     ),
-    "dream_apply": ToolSpec(
+    Operation.DREAM_APPLY: ToolSpec(
         "Apply a reviewed dream plan; rejects stale or already-applied proposals.",
-        "dream",
+        Operation.DREAM,
         destructive=True,
     ),
-    "begin_task": ToolSpec(
+    RuntimeOperation.BEGIN_TASK: ToolSpec(
         "Start or resume a durable task with objective, project, and explicit attributes before acting.",
-        "task",
+        RuntimeOperation.TASK,
         idempotent=True,
     ),
-    "prepare_task": ToolSpec(
+    RuntimeOperation.PREPARE_TASK: ToolSpec(
         "Inject preferences, supporting memories, and resolved knowledge for a task. Set guard=true immediately before an action to block conflicts and unresolved gaps.",
-        "prepare_task",
+        RuntimeOperation.PREPARE_TASK,
         open_world=True,
     ),
-    "require_knowledge": ToolSpec(
+    RuntimeOperation.REQUIRE_KNOWLEDGE: ToolSpec(
         "Declare missing information; search memory, then configured research sources. Save supported findings automatically. Unresolved results block guarded actions.",
-        "knowledge",
+        RuntimeOperation.KNOWLEDGE,
         open_world=True,
     ),
-    "record_finding": ToolSpec(
+    RuntimeOperation.RECORD_FINDING: ToolSpec(
         "Durably capture an evidenced discovery for reconciliation. Reuse the same event_id and finding on retries.",
-        "capture",
+        RuntimeOperation.CAPTURE,
         idempotent=True,
     ),
-    "complete_task": ToolSpec(
+    RuntimeOperation.COMPLETE_TASK: ToolSpec(
         "Record an explicit task outcome and optional findings. Success requires resolved knowledge gaps. Replay the same content on retries.",
-        "capture",
+        RuntimeOperation.CAPTURE,
         idempotent=True,
     ),
-    "maintenance_status": ToolSpec(
+    RuntimeOperation.MAINTENANCE_STATUS: ToolSpec(
         "Inspect owner-scoped queued, running, failed, or proposed maintenance with pagination.",
-        "maintenance_status",
+        RuntimeOperation.MAINTENANCE_STATUS,
         read_only=True,
         idempotent=True,
     ),
-    "review_job": ToolSpec(
+    RuntimeOperation.REVIEW_JOB: ToolSpec(
         "Accept or reject a concrete maintenance proposal after reviewing its evidence; acceptance may modify existing memories.",
-        "review_job",
+        RuntimeOperation.REVIEW_JOB,
         destructive=True,
     ),
-    "retry_job": ToolSpec(
+    RuntimeOperation.RETRY_JOB: ToolSpec(
         "Retry failed, proposed, or rejected maintenance using fresh reasoning; discards prior approval.",
-        "retry_job",
+        RuntimeOperation.RETRY_JOB,
     ),
 }
 

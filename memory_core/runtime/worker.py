@@ -21,6 +21,7 @@ from memory_core.memory.models import (
 from memory_core.memory.reconciliation import equivalent
 
 from .dreams import advance, scan_for
+from .models import JobKind, JobResultKind, JobStatus
 
 
 class ReviewNeeded(Exception):
@@ -101,12 +102,14 @@ class Worker:
             return False
         try:
             async with asyncio.timeout(self.policy.job_timeout_seconds):
-                if claim.kind == "capture":
+                if claim.kind == JobKind.CAPTURE:
                     await self._capture(claim)
                 else:
                     await self._dream(claim)
         except ReviewNeeded as exc:
-            await asyncio.to_thread(self._finish, claim, "proposed", exc.proposal)
+            await asyncio.to_thread(
+                self._finish, claim, JobStatus.PROPOSED, exc.proposal
+            )
         except asyncio.CancelledError as exc:
             await asyncio.to_thread(self.queue.fail, claim, exc)
             raise
@@ -120,7 +123,7 @@ class Worker:
             self.queue.transaction(claim.owner) as session,
         ):
             self.queue.finish(session, claim, status, result)
-            if claim.kind == "dream" and status == "proposed":
+            if claim.kind == JobKind.DREAM and status == JobStatus.PROPOSED:
                 advance(
                     self.queue, session, claim, DreamPlan.model_validate(result["plan"])
                 )
@@ -184,7 +187,7 @@ class Worker:
             if not permitted:
                 raise ReviewNeeded(
                     {
-                        "kind": "capture_proposal",
+                        "kind": JobResultKind.CAPTURE_PROPOSAL,
                         "incoming": memory.model_dump(mode="json"),
                         "neighbors": [
                             h.model_dump(mode="json") for h in response.neighbors
@@ -196,9 +199,9 @@ class Worker:
             self.queue.finish(
                 session,
                 claim,
-                "done",
+                JobStatus.DONE,
                 {
-                    "kind": "capture_applied",
+                    "kind": JobResultKind.CAPTURE_APPLIED,
                     "memory_id": response.memory.id,
                     "decision": response.decision.model_dump(mode="json"),
                 },
@@ -243,7 +246,7 @@ class Worker:
             ):
                 raise ReviewNeeded(
                     {
-                        "kind": "dream_proposal",
+                        "kind": JobResultKind.DREAM_PROPOSAL,
                         "plan_id": plan.id,
                         "plan": plan.model_dump(mode="json"),
                         "generation": plan.generation,
@@ -255,9 +258,9 @@ class Worker:
             self.queue.finish(
                 session,
                 claim,
-                "done",
+                JobStatus.DONE,
                 {
-                    "kind": "dream_applied",
+                    "kind": JobResultKind.DREAM_APPLIED,
                     "plan_id": plan_id,
                     "applied": response.plan.applied,
                     "recommendations": response.plan.proposal.recommendations,

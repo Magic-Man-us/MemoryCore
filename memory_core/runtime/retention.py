@@ -12,7 +12,7 @@ from sqlalchemy import text
 
 from memory_core.storage.codec import JSON_VALUE
 
-from .models import Model
+from .models import JobKind, Model
 
 
 class RetentionPolicy(Model):
@@ -90,7 +90,7 @@ async def maintain(runtime, owner_id):
                 },
             ).all()
             for uid, kind, raw_result in jobs:
-                if kind == "dream" and raw_result:
+                if kind == JobKind.DREAM and raw_result:
                     plan_id = JSON_VALUE.validate_json(raw_result).get("plan_id")
                     plan = session.execute(
                         text(

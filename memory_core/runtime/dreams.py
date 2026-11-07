@@ -4,6 +4,8 @@ from sqlalchemy import text
 
 from memory_core.storage.codec import JSON_VALUE
 
+from .models import JobKind
+
 
 def scan_for(queue, claim):
     """Pin a high-water mark once, including across retries and process restarts."""
@@ -56,7 +58,7 @@ def advance(queue, session, claim, plan):
         queue.enqueue(
             session,
             claim.owner,
-            "dream",
+            JobKind.DREAM,
             {"scan": {**scan, "cursor": plan.cursor, "cursor_id": plan.cursor_id}},
         )
     else:

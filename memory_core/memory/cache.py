@@ -11,11 +11,17 @@ from heapq import nsmallest
 from sqlalchemy import text
 
 from memory_core._native import PyVectorIndex
-from memory_core.indexing.semantic import HnswIndex, IndexPolicy
+from memory_core.indexing.semantic import HnswIndex, IndexBackend, IndexPolicy
 from memory_core.storage.codec import decode_embedding
 
 from .metadata import MetadataIndex, Registry, value_key
-from .models import MEMORY_ADAPTER, PreferenceMemory, RetrievalPolicy
+from .models import (
+    MEMORY_ADAPTER,
+    MemoryKind,
+    PreferenceMemory,
+    RetrievalPolicy,
+    Status,
+)
 from .payloads import Payloads
 from .reconciliation import equivalence_key
 
@@ -56,7 +62,7 @@ class OwnerCache:
         self.restored_generation = -1
         self.vectors = (
             HnswIndex(dim, self.index_policy)
-            if self.index_policy.backend == "hnsw"
+            if self.index_policy.backend == IndexBackend.HNSW
             else PyVectorIndex(dim)
         )
         self.metadata = MetadataIndex()
@@ -102,7 +108,7 @@ class OwnerCache:
             memory = MEMORY_ADAPTER.validate_json(payload)
             if memory.id in self.headers:
                 self.discard(memory.id)
-            if memory.status == "superseded" and not self.include_retired:
+            if memory.status == Status.SUPERSEDED and not self.include_retired:
                 if memory.id in self.memories:
                     del self.memories[memory.id]
                 self.metadata.remove(memory.id)
@@ -129,7 +135,11 @@ class OwnerCache:
                 self.windows[memory.id] = (memory.valid_from, memory.valid_until)
             self.metadata.upsert(
                 memory.id,
-                {**memory.metadata, "kind": memory.kind, "status": memory.status.value},
+                {
+                    **memory.metadata,
+                    "kind": memory.kind.value,
+                    "status": memory.status.value,
+                },
             )
             self.by_kind[memory.kind].add(memory.id)
             self.by_status[memory.status].add(memory.id)
@@ -144,9 +154,9 @@ class OwnerCache:
                 self.vectors.remove(memory.id)
 
     def _index_content(self, memory):
-        if memory.status == "active":
+        if memory.status == Status.ACTIVE:
             self.equivalents[self.key(memory)].add(memory.id)
-        if memory.kind != "preference" or memory.status == "superseded":
+        if memory.kind != MemoryKind.PREFERENCE or memory.status == Status.SUPERSEDED:
             return
         self.preference_fields[memory.id] = len(memory.applicability)
         if not memory.applicability:

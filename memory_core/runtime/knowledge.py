@@ -13,6 +13,7 @@ from memory_core.memory.models import (
     DescribeSchemaRequest,
     ObservationMemory,
     RecallRequest,
+    Status,
 )
 
 from .models import (
@@ -63,7 +64,7 @@ def is_current(session, owner, gap_json, result_json):
         if raw is None:
             return False
         memory = MEMORY_ADAPTER.validate_json(raw)
-        if memory.revision != revision or memory.status != "active":
+        if memory.revision != revision or memory.status != Status.ACTIVE:
             return False
     return True
 
@@ -209,7 +210,7 @@ async def resolve(runtime, request, owner, *, transaction_guard=None):
                     if (
                         current_memory is None
                         or current_memory.revision != original.revision
-                        or current_memory.status != "active"
+                        or current_memory.status != Status.ACTIVE
                     ):
                         raise ConflictError(
                             "memory evidence changed during knowledge resolution; retry"
