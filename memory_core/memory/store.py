@@ -6,10 +6,11 @@ snapshot after one-time owner initialization.
 
 from __future__ import annotations
 
-import json
 from contextlib import contextmanager
 
 from sqlalchemy import text
+
+from memory_core.storage.codec import JSON_VALUE
 
 from .metadata import DEFAULT_FIELDS
 from .models import FieldDefinition
@@ -135,7 +136,12 @@ class Store:
             text(
                 "INSERT INTO memory_audit(owner,generation,action,detail) VALUES (:o,:g,:a,:d)"
             ),
-            {"o": owner, "g": generation, "a": action, "d": json.dumps(detail)},
+            {
+                "o": owner,
+                "g": generation,
+                "a": action,
+                "d": JSON_VALUE.dump_json(detail).decode(),
+            },
         )
         return generation
 

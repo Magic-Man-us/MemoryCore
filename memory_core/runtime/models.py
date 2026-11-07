@@ -77,6 +77,7 @@ KnowledgeResult = Annotated[
     Field(discriminator="status"),
 ]
 KNOWLEDGE_ADAPTER = TypeAdapter(KnowledgeResult)
+EVIDENCE_ADAPTER = TypeAdapter(list[Evidence])
 
 
 class KnowledgeInput(Model):

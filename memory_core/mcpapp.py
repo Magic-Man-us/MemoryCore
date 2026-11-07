@@ -11,7 +11,6 @@ import argparse
 import asyncio
 import importlib
 import inspect
-import json
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from typing import Literal
@@ -22,6 +21,7 @@ from memory_core.memory.errors import MemoryError
 from memory_core.runtime import MemoryCore, MemoryTools
 from memory_core.runtime.catalog import SPECS, schemas
 from memory_core.runtime.models import Model
+from memory_core.storage.codec import JSON_VALUE
 
 
 class ValidationIssue(Model):
@@ -110,15 +110,13 @@ def create_server(
         return ListToolsResult(tools=definitions)
 
     def failure(code, message, issues=()):
-        value = ToolFailure(code=code, message=message, issues=list(issues)).model_dump(
-            mode="json"
-        )
+        failure_result = ToolFailure(code=code, message=message, issues=list(issues))
         # Error results use the modeled error envelope. The advertised success
         # schema describes successful calls; clients skip it when is_error=True.
         return CallToolResult(
             is_error=True,
-            structured_content=value,
-            content=[TextContent(type="text", text=json.dumps(value))],
+            structured_content=failure_result.model_dump(mode="json"),
+            content=[TextContent(type="text", text=failure_result.model_dump_json())],
         )
 
     async def call_tool(context, params):
@@ -149,7 +147,9 @@ def create_server(
             return failure(type(exc).__name__, str(exc))
         return CallToolResult(
             structured_content=value,
-            content=[TextContent(type="text", text=json.dumps(value))],
+            content=[
+                TextContent(type="text", text=JSON_VALUE.dump_json(value).decode())
+            ],
         )
 
     return Server(

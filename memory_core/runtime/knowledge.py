@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
-from pydantic import TypeAdapter
 from sqlalchemy import text
 
 from memory_core.memory.errors import ConflictError
@@ -17,6 +16,7 @@ from memory_core.memory.models import (
 )
 
 from .models import (
+    EVIDENCE_ADAPTER,
     KNOWLEDGE_ADAPTER,
     CaptureResponse,
     Evidence,
@@ -28,8 +28,6 @@ from .models import (
     UnresolvedKnowledge,
 )
 from .queue import canonical
-
-EVIDENCE_ADAPTER = TypeAdapter(list[Evidence])
 
 
 def is_fresh(gap_json, result_json):

@@ -10,6 +10,8 @@ from datetime import UTC, datetime, timedelta
 from pydantic import Field
 from sqlalchemy import text
 
+from memory_core.storage.codec import JSON_VALUE
+
 from .models import Model
 
 
@@ -89,16 +91,14 @@ async def maintain(runtime, owner_id):
             ).all()
             for uid, kind, raw_result in jobs:
                 if kind == "dream" and raw_result:
-                    import json
-
-                    plan_id = json.loads(raw_result).get("plan_id")
+                    plan_id = JSON_VALUE.validate_json(raw_result).get("plan_id")
                     plan = session.execute(
                         text(
                             "SELECT payload FROM memory_dreams WHERE owner=:o AND id=:id"
                         ),
                         {"o": owner_id, "id": plan_id},
                     ).scalar()
-                    if plan and json.loads(plan).get("applied"):
+                    if plan and JSON_VALUE.validate_json(plan).get("applied"):
                         session.execute(
                             text(
                                 "INSERT OR IGNORE INTO memory_dream_archives VALUES (:o,:id,:p)"

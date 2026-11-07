@@ -1,8 +1,8 @@
 """Durable, finite dream scans; continuation and acknowledgement share a transaction."""
 
-import json
-
 from sqlalchemy import text
+
+from memory_core.storage.codec import JSON_VALUE
 
 
 def scan_for(queue, claim):
@@ -12,7 +12,7 @@ def scan_for(queue, claim):
         queue.transaction(claim.owner) as session,
     ):
         queue.assert_lease(session, claim)
-        payload = json.loads(
+        payload = JSON_VALUE.validate_json(
             session.execute(
                 text("SELECT payload FROM memory_jobs WHERE owner=:o AND id=:id"),
                 {"o": claim.owner, "id": claim.id},
@@ -28,7 +28,11 @@ def scan_for(queue, claim):
             }
             session.execute(
                 text("UPDATE memory_jobs SET payload=:p WHERE owner=:o AND id=:id"),
-                {"p": json.dumps(payload), "o": claim.owner, "id": claim.id},
+                {
+                    "p": JSON_VALUE.dump_json(payload).decode(),
+                    "o": claim.owner,
+                    "id": claim.id,
+                },
             )
         return payload["scan"]
 
@@ -39,7 +43,7 @@ def advance(queue, session, claim, plan):
         text("SELECT payload FROM memory_jobs WHERE owner=:o AND id=:id"),
         {"o": claim.owner, "id": claim.id},
     ).scalar_one()
-    payload = json.loads(row)
+    payload = JSON_VALUE.validate_json(row)
     if payload.get("continued") or "scan" not in payload:
         return
     scan = payload["scan"]
@@ -78,7 +82,7 @@ def advance(queue, session, claim, plan):
     payload["continued"] = True
     session.execute(
         text("UPDATE memory_jobs SET payload=:p WHERE owner=:o AND id=:id"),
-        {"p": json.dumps(payload), "o": claim.owner, "id": claim.id},
+        {"p": JSON_VALUE.dump_json(payload).decode(), "o": claim.owner, "id": claim.id},
     )
     if not more:
         queue.schedule_dream(session, claim.owner)

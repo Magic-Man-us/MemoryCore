@@ -3,16 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-import json
-
-from pydantic import TypeAdapter
 
 from memory_core.memory.errors import MemoryError
-from memory_core.runtime.models import Evidence
+from memory_core.runtime.models import EVIDENCE_ADAPTER
 
 from .binding import OPERATIONS
-
-EVIDENCE_ADAPTER = TypeAdapter(list[Evidence])
 
 
 class MemoryHooks:
@@ -61,7 +56,7 @@ class MemoryHooks:
                 evidence = EVIDENCE_ADAPTER.validate_python(values)
                 if len(evidence) > self.binding.policy.max_evidence_records:
                     raise ValueError("tool extractor exceeded evidence limit")
-                rendered = json.dumps([e.model_dump(mode="json") for e in evidence])
+                rendered = EVIDENCE_ADAPTER.dump_json(evidence).decode()
                 if len(rendered) > self.binding.policy.max_context_chars:
                     raise ValueError("tool evidence exceeded context budget")
                 self.binding.remember_evidence(evidence)
