@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import math
 import secrets
+from datetime import UTC, datetime
 import threading
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
@@ -291,6 +292,7 @@ class MemoryService:
                 ids = cache.eligible(request.project_id, active=False) & set.union(
                     set(), *(cache.by_status[status] for status in request.statuses)
                 )
+                ids -= cache.outside_window(request.as_of or datetime.now(UTC))
                 if request.filter is not None:
                     ids = cache.metadata.select(request.filter, registry, ids)
                 hits = [
@@ -461,7 +463,11 @@ class MemoryService:
                             score=score,
                         )
                         for uid, score in cache.search(
-                            query, vector, cache.eligible(context.project_id), limit
+                            query,
+                            vector,
+                            cache.eligible(context.project_id)
+                            - cache.outside_window(datetime.now(UTC)),
+                            limit,
                         )
                     ]
                 )

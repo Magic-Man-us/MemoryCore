@@ -53,6 +53,10 @@ The engine adds read-only `kind` and `status` values to its index; callers canno
 through metadata. Recall defaults to active records. Supply `statuses` explicitly when
 inspecting disputed/superseded history; an empty statuses list returns nothing.
 
+A record may set `valid_from` and `valid_until` (timezone-aware). Recall, prepared context,
+and preference resolution skip records outside that window at the current time;
+`RecallRequest.as_of` evaluates windows at another time. Unset bounds mean always valid.
+
 Owner is a trusted call argument, not an agent request field. A project request includes
 that project's records and global user records; it excludes other projects. A request
 without a project includes global user records only. A metadata filter cannot widen scope.

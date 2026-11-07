@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from datetime import UTC, datetime
 
 from .models import (
     PreferenceConflict,
@@ -16,7 +17,9 @@ from .models import (
 def resolve_preferences(cache, registry, generation, context):
     attributes = registry.normalize(context.attributes)
     groups = defaultdict(list)
-    ids = cache.matching_preferences(attributes, context.project_id)
+    ids = cache.matching_preferences(
+        attributes, context.project_id
+    ) - cache.outside_window(datetime.now(UTC))
     for uid in sorted(ids):
         memory = cache.memories[uid]
         groups[memory.preference_key].append(memory)
