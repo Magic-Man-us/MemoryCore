@@ -180,6 +180,7 @@ async def _main(factory_path, owner, allowed):
     module_name, separator, attribute = factory_path.partition(":")
     if not separator or not module_name or not attribute:
         raise ValueError("factory must be module:callable")
+    # Reflective on purpose: the factory is named by trusted local configuration.
     factory = getattr(importlib.import_module(module_name), attribute)
     memory = factory()
     if inspect.isawaitable(memory):

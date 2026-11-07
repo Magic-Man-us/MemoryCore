@@ -15,7 +15,7 @@ from memory_core.indexing.semantic import HnswIndex, IndexPolicy
 from memory_core.storage.codec import decode_embedding
 
 from .metadata import MetadataIndex, Registry, value_key
-from .models import MEMORY_ADAPTER, RetrievalPolicy
+from .models import MEMORY_ADAPTER, PreferenceMemory, RetrievalPolicy
 from .payloads import Payloads
 from .reconciliation import equivalence_key
 
@@ -111,13 +111,15 @@ class OwnerCache:
             self.memories[memory.id] = memory
             terms = [
                 (field, value_key(v))
-                for field, values in getattr(memory, "applicability", {}).items()
+                for field, values in (
+                    memory.applicability if isinstance(memory, PreferenceMemory) else {}
+                ).items()
                 for v in values
             ]
             self.headers[memory.id] = Header(
                 memory.kind,
                 memory.status,
-                getattr(memory.scope, "project_id", None),
+                memory.scope.project_id,
                 tokens(memory.summary),
                 self.key(memory),
                 terms,
@@ -131,7 +133,7 @@ class OwnerCache:
             )
             self.by_kind[memory.kind].add(memory.id)
             self.by_status[memory.status].add(memory.id)
-            self.by_project[getattr(memory.scope, "project_id", None)].add(memory.id)
+            self.by_project[memory.scope.project_id].add(memory.id)
             for token in tokens(memory.summary):
                 self.lexical[token].add(memory.id)
             if embedding and (

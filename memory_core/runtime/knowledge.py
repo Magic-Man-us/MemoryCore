@@ -12,6 +12,7 @@ from memory_core.memory.errors import ConflictError
 from memory_core.memory.models import (
     MEMORY_ADAPTER,
     DescribeSchemaRequest,
+    ObservationMemory,
     RecallRequest,
 )
 
@@ -130,7 +131,9 @@ async def resolve(runtime, request, owner, *, transaction_guard=None):
                     id=f"memory:{m.id}:{m.revision}",
                     uri=f"memory:{m.id}",
                     excerpt=m.summary,
-                    observed_at=getattr(m, "observed_at", m.created_at),
+                    observed_at=m.observed_at
+                    if isinstance(m, ObservationMemory)
+                    else m.created_at,
                 )
             )
         schema = await service.call(DescribeSchemaRequest(), owner_id=owner)

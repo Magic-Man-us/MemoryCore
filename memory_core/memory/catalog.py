@@ -81,9 +81,7 @@ def catalog(service, request, owner):
             # Apply scope before pagination so hidden values cannot affect results.
             eligible = cache.by_status[Status.ACTIVE]
             if request.scope is not None:
-                eligible = eligible & cache.eligible(
-                    getattr(request.scope, "project_id", None)
-                )
+                eligible = eligible & cache.eligible(request.scope.project_id)
             values = sorted(
                 (
                     key[1]

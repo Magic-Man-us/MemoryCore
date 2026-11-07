@@ -5,6 +5,8 @@ assert that the user stated a preference: ``explicit`` is trusted provenance, so
 set by host code calling ``MemoryCore.call`` directly, never by a tool call.
 """
 
+from pydantic import BaseModel
+
 from memory_core.memory.models import PreferenceMemory, RememberRequest
 
 from .models import REQUEST_ADAPTER, RESPONSE_ADAPTER
@@ -13,7 +15,7 @@ from .models import REQUEST_ADAPTER, RESPONSE_ADAPTER
 def untrusted(request):
     """Downgrade claims a tool caller cannot prove. Returns a validated request."""
     request = REQUEST_ADAPTER.validate_python(
-        request.model_dump(mode="json") if hasattr(request, "model_dump") else request
+        request.model_dump(mode="json") if isinstance(request, BaseModel) else request
     )
     if (
         isinstance(request, RememberRequest)

@@ -108,7 +108,7 @@ def apply_reconciliation(
         decision.action,
         {
             "new_id": memory.id,
-            "target_id": getattr(decision, "target_id", None),
+            "target_id": None if isinstance(decision, Create) else decision.target_id,
             "sources": memory.source_refs,
         },
         write=write,
