@@ -30,6 +30,7 @@ dev = [
     "pytest>=9.0.3",
     "pytest-asyncio>=0.24",
     "pyright>=1.1.408",
+    "ruff>=0.15.7",
 ]
 local = [
     "sentence-transformers>=5.4,<6",
@@ -61,6 +62,15 @@ pythonVersion = "3.12"
 typeCheckingMode = "standard"
 venvPath = "."
 venv = ".venv"
+
+[tool.ruff.lint]
+extend-select = ["ANN"]
+
+[tool.ruff.lint.per-file-ignores]
+# Annotation enforcement covers the package; these directories are not annotated yet.
+"tests/**" = ["ANN"]
+"examples/**" = ["ANN"]
+"benchmarks/**" = ["ANN"]
 
 [tool.ruff.lint.flake8-type-checking]
 # Pydantic evaluates annotations at runtime; never let the TC rules move their
