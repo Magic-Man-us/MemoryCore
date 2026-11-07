@@ -21,6 +21,23 @@ fn normalized(v: Vec<f32>, dim: usize, allow_zero: bool) -> Result<Vec<f32>, Str
         .collect())
 }
 
+/// Lanes for the dot product. A single running `f32` sum cannot be auto-vectorized
+/// (float addition is not associative); independent lane sums can.
+const LANES: usize = 8;
+
+fn dot(a: &[f32], b: &[f32]) -> f32 {
+    let (a_lanes, a_tail) = a.as_chunks::<LANES>();
+    let (b_lanes, b_tail) = b.as_chunks::<LANES>();
+    let mut lanes = [0.0f32; LANES];
+    for (x, y) in a_lanes.iter().zip(b_lanes) {
+        for ((lane, x), y) in lanes.iter_mut().zip(x).zip(y) {
+            *lane += x * y;
+        }
+    }
+    let tail: f32 = a_tail.iter().zip(b_tail).map(|(x, y)| x * y).sum();
+    lanes.iter().sum::<f32>() + tail
+}
+
 #[pyclass(frozen, module = "memory_core._native")]
 pub struct PyVectorIndex {
     dim: usize,
@@ -76,7 +93,7 @@ impl PyVectorIndex {
                 .into_iter()
                 .filter_map(|id| {
                     vectors.get(&id).map(|v| {
-                        let score: f32 = v.iter().zip(&query).map(|(a, b)| a * b).sum();
+                        let score = dot(v, &query);
                         (id, score)
                     })
                 })
@@ -92,6 +109,27 @@ impl PyVectorIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn dot_matches_sequential_sum() {
+        for len in [1, 7, 8, 9, 384, 385] {
+            let a: Vec<f32> = (0..len)
+                .map(|i| ((i * 37 % 101) as f32 - 50.0) / 50.0)
+                .collect();
+            let b: Vec<f32> = (0..len)
+                .map(|i| ((i * 53 % 97) as f32 - 48.0) / 48.0)
+                .collect();
+            let sequential: f64 = a
+                .iter()
+                .zip(&b)
+                .map(|(x, y)| f64::from(*x) * f64::from(*y))
+                .sum();
+            assert!(
+                (f64::from(dot(&a, &b)) - sequential).abs() < 1e-4,
+                "len {len}"
+            );
+        }
+    }
+
     #[test]
     fn validates_and_normalizes() {
         assert!(normalized(vec![0.0, 0.0], 2, false).is_err());

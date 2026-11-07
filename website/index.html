@@ -189,12 +189,12 @@
           <h2>Numbers from one synthetic run.</h2>
           <p>
             50,000 records with 384-dimensional vectors, 30 warm queries, one
-            container. Reproduce with <code>benchmarks/memory_scale.py</code>.
+            machine, release build. Reproduce with <code>benchmarks/memory_scale.py</code>.
           </p>
 
           <div class="metric-grid">
-            <div><strong>12<span> ms</span></strong><p>Median recall, filtered to about 500 records</p></div>
-            <div><strong>152<span> ms</span></strong><p>Median unfiltered recall</p></div>
+            <div><strong>3.2<span> ms</span></strong><p>Median recall, filtered to about 500 records</p></div>
+            <div><strong>30<span> ms</span></strong><p>Median unfiltered recall</p></div>
             <div><strong>0</strong><p>Required external services</p></div>
             <div><strong>4</strong><p>Typed memory kinds</p></div>
           </div>
@@ -227,7 +227,7 @@
               <i>✓</i>
             </li>
           </ol>
-          <div class="trace-footer"><span>Filtered recall, median</span><strong>12 ms</strong></div>
+          <div class="trace-footer"><span>Filtered recall, median</span><strong>3.2 ms</strong></div>
         </div>
       </section>
 
