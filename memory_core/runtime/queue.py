@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import time
 from dataclasses import dataclass
 from uuid import uuid4
@@ -11,6 +10,7 @@ from sqlalchemy import text
 
 from memory_core.memory.errors import ConflictError
 from memory_core.memory.models import TaskContext
+from memory_core.storage.codec import JSON_VALUE, canonical_json
 
 from .models import JobView, TaskResponse
 
@@ -42,7 +42,7 @@ DDL = (
 
 
 def canonical(model):
-    return json.dumps(model.model_dump(mode="json"), sort_keys=True)
+    return canonical_json(model.model_dump(mode="json"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,8 +83,8 @@ class Queue:
         return TaskResponse(
             context=TaskContext.model_validate_json(row["context"]),
             objective=row["objective"],
-            sources=json.loads(row["sources"]),
-            outcome=json.loads(row["completion"])["outcome"]
+            sources=JSON_VALUE.validate_json(row["sources"]),
+            outcome=JSON_VALUE.validate_json(row["completion"])["outcome"]
             if row["completion"]
             else None,
         )
@@ -100,14 +100,14 @@ class Queue:
                 "id": job_id,
                 "task": task_id,
                 "kind": kind,
-                "payload": json.dumps(payload),
+                "payload": JSON_VALUE.dump_json(payload).decode(),
                 "available": time.time(),
             },
         )
         return job_id
 
     def capture(self, session, owner, task_id, event_id, payload):
-        raw = json.dumps(payload, sort_keys=True)
+        raw = canonical_json(payload)
         old = session.execute(
             text("""SELECT payload,job_id FROM memory_events
             WHERE owner=:o AND task_id=:t AND id=:id"""),
@@ -200,10 +200,10 @@ class Queue:
                 row["id"],
                 row["task_id"],
                 row["kind"],
-                json.loads(row["payload"]),
+                JSON_VALUE.validate_json(row["payload"]),
                 token,
                 row["attempts"] + 1,
-                json.loads(row["result"]) if row["result"] else None,
+                JSON_VALUE.validate_json(row["result"]) if row["result"] else None,
             )
             session.commit()
             return claim
@@ -232,7 +232,9 @@ class Queue:
                 "o": claim.owner,
                 "id": claim.id,
                 "s": status,
-                "r": json.dumps(result) if result is not None else None,
+                "r": JSON_VALUE.dump_json(result).decode()
+                if result is not None
+                else None,
                 "e": error,
             },
         )
@@ -276,5 +278,5 @@ class Queue:
             status=row["status"],
             attempts=row["attempts"],
             error=row["error"],
-            result=json.loads(row["result"]) if row["result"] else None,
+            result=JSON_VALUE.validate_json(row["result"]) if row["result"] else None,
         )

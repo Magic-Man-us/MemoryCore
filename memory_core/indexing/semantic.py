@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import tempfile
 from pathlib import Path
 from threading import RLock
@@ -21,6 +20,14 @@ class IndexPolicy(BaseModel):
     max_candidates: int = Field(default=4096, ge=1)
     payload_cache_size: int = Field(default=256, ge=0)
     checkpoint_after_updates: int = Field(default=1000, ge=1)
+
+
+class GraphManifest(BaseModel):
+    version: int
+    labels: dict[str, int]
+    active: list[str]
+    capacity: int
+    digest: str
 
 
 class CandidateIndex(Protocol):
@@ -156,35 +163,30 @@ class HnswIndex:
                 path = Path(directory) / "index.bin"
                 self.graph.save_index(str(path))
                 blob = path.read_bytes()
-            manifest = json.dumps(
-                {
-                    "version": 1,
-                    "labels": self.labels,
-                    "active": sorted(self.active),
-                    "capacity": self.capacity,
-                    "digest": hashlib.sha256(blob).hexdigest(),
-                }
-            )
+            manifest = GraphManifest(
+                version=1,
+                labels=self.labels,
+                active=sorted(self.active),
+                capacity=self.capacity,
+                digest=hashlib.sha256(blob).hexdigest(),
+            ).model_dump_json()
             return manifest, blob
 
     def restore(self, manifest, blob):
         with self.lock:
-            data = json.loads(manifest)
-            if (
-                data["version"] != 1
-                or hashlib.sha256(blob).hexdigest() != data["digest"]
-            ):
+            data = GraphManifest.model_validate_json(manifest)
+            if data.version != 1 or hashlib.sha256(blob).hexdigest() != data.digest:
                 raise ValueError("invalid graph snapshot")
             with tempfile.TemporaryDirectory() as directory:
                 path = Path(directory) / "index.bin"
                 path.write_bytes(blob)
                 graph = self.library.Index(space="cosine", dim=self.dimensions)
-                graph.load_index(str(path), max_elements=data["capacity"])
+                graph.load_index(str(path), max_elements=data.capacity)
             graph.set_num_threads(1)
             graph.set_ef(self.policy.ef_search)
-            if set(graph.get_ids_list()) != set(data["labels"].values()):
+            if set(graph.get_ids_list()) != set(data.labels.values()):
                 raise ValueError("snapshot labels do not match graph")
-            self.graph, self.capacity = graph, data["capacity"]
-            self.labels, self.active = data["labels"], set(data["active"])
+            self.graph, self.capacity = graph, data.capacity
+            self.labels, self.active = data.labels, set(data.active)
             self.reverse = {label: uid for uid, label in self.labels.items()}
             self.updates = 0

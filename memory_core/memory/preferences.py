@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import json
 from collections import defaultdict
+
+from memory_core.storage.codec import canonical_json
 
 from .models import (
     PreferenceConflict,
@@ -34,7 +35,7 @@ def resolve_preferences(cache, registry, generation, context, at):
             ]
         project = [m for m in memories if isinstance(m.scope, ProjectScope)]
         relevant = project or memories
-        signatures = {json.dumps(m.value, sort_keys=True) for m in relevant}
+        signatures = {canonical_json(m.value) for m in relevant}
         if len(signatures) > 1 or any(m.status == Status.DISPUTED for m in relevant):
             conflicts.append(PreferenceConflict(preference_key=key, memories=relevant))
         else:

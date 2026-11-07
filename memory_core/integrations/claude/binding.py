@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from collections import OrderedDict
 from copy import deepcopy
 
@@ -33,6 +32,7 @@ from memory_core.runtime.models import (
     TaskRunResult,
 )
 from memory_core.runtime.tools import MemoryTools
+from memory_core.storage.codec import JSON_VALUE
 
 # Protocol capabilities, not domain vocabulary. Lifecycle completion/review is host-only.
 OPERATIONS = frozenset(
@@ -214,7 +214,7 @@ class TaskBinding(MemoryTools):
                     self.remember_evidence(result.evidence)
         value = response.model_dump(mode="json")
         if (
-            len(json.dumps(value, ensure_ascii=False))
+            len(JSON_VALUE.dump_json(value).decode())
             > self.policy.max_tool_output_chars
         ):
             raise ContextBudgetError(

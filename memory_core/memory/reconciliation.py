@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
 
 from sqlalchemy import text
 
-from memory_core.storage.codec import encode_embedding
+from memory_core.storage.codec import canonical_json, encode_embedding
 
 from .errors import ConflictError, SchemaError
 from .models import (
@@ -32,7 +31,7 @@ def equivalence_key(memory):
         "source_refs",
         "supersedes_id",
     }
-    return json.dumps(memory.model_dump(mode="json", exclude=excluded), sort_keys=True)
+    return canonical_json(memory.model_dump(mode="json", exclude=excluded))
 
 
 def equivalent(a, b):
@@ -81,10 +80,7 @@ def apply_reconciliation(
             if (
                 isinstance(decision, AttachEvidence)
                 and isinstance(memory, PreferenceMemory)
-                and (
-                    json.dumps(target.value, sort_keys=True)
-                    != json.dumps(memory.value, sort_keys=True)
-                )
+                and (canonical_json(target.value) != canonical_json(memory.value))
             ):
                 raise SchemaError(
                     "cannot attach contradictory preference values as evidence"

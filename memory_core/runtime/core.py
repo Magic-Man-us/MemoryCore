@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from datetime import UTC, datetime
 
 from pydantic import BaseModel
@@ -19,6 +18,7 @@ from memory_core.memory.models import (
 )
 from memory_core.memory.service import MemoryService
 from memory_core.storage import Database
+from memory_core.storage.codec import JSON_VALUE
 
 from .knowledge import is_current
 from .models import (
@@ -219,7 +219,7 @@ class MemoryCore:
                         "t": context.task_id,
                         "c": context.model_dump_json(),
                         "q": request.objective,
-                        "s": json.dumps(sources),
+                        "s": JSON_VALUE.dump_json(sources).decode(),
                     },
                 )
                 saved = self.queue.task(session, owner, context.task_id)
@@ -301,7 +301,9 @@ class MemoryCore:
             {"o": owner, "t": task_id, "id": event_id},
         ).scalar_one_or_none()
         captured_at = (
-            json.loads(old)["captured_at"] if old else datetime.now(UTC).isoformat()
+            JSON_VALUE.validate_json(old)["captured_at"]
+            if old
+            else datetime.now(UTC).isoformat()
         )
         return self.queue.capture(
             session,
@@ -368,7 +370,7 @@ class MemoryCore:
             )
             if row is None or row["status"] != "proposed":
                 raise ConflictError("job is not awaiting review")
-            result = json.loads(row["result"])
+            result = JSON_VALUE.validate_json(row["result"])
             if (
                 request.accept
                 and result["generation"]
@@ -383,7 +385,7 @@ class MemoryCore:
                     "o": owner,
                     "id": request.job_id,
                     "s": "pending" if request.accept else "rejected",
-                    "r": json.dumps(result),
+                    "r": JSON_VALUE.dump_json(result).decode(),
                 },
             )
             row = (

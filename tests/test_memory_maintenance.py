@@ -417,3 +417,12 @@ async def test_local_accepts_embedding_spec_as_mapping(tmp_path):
         assert [hit.memory.id for hit in hits.hits] == ["m000000"]
     finally:
         memory.service.store.db.engine.dispose()
+
+
+def test_canonical_json_bytes_match_stored_replay_payloads():
+    from memory_core.storage.codec import canonical_json
+
+    # Event replay compares against payloads already stored in this exact form.
+    assert (
+        canonical_json({"b": 1, "a": ["é", None]}) == '{"a": ["\\u00e9", null], "b": 1}'
+    )
