@@ -23,6 +23,7 @@ from memory_core.memory.models import (
     UserScope,
 )
 from memory_core.runtime.context import render_context
+from memory_core.runtime.core import MemoryCore
 from memory_core.runtime.models import (
     REQUEST_ADAPTER,
     BeginTaskRequest,
@@ -47,7 +48,6 @@ if TYPE_CHECKING:
     from claude_agent_sdk import McpSdkServerConfig
 
     from memory_core.memory.models import Scope, TaskContext
-    from memory_core.runtime.core import MemoryCore
     from memory_core.runtime.models import (
         CaptureResponse,
         Evidence,
@@ -78,7 +78,7 @@ TASK_BOUND_REQUESTS = (
 )
 
 
-class TaskBinding(MemoryTools):
+class TaskBinding(MemoryTools[MemoryCore]):
     def __init__(
         self,
         memory: MemoryCore,

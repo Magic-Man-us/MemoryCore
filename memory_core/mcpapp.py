@@ -54,7 +54,7 @@ def create_server(
     owner_id: str,
     allowed_operations: Collection[str] | None = None,
     bound_arguments: Mapping[str, dict[str, JsonValue]] | None = None,
-    tool_adapter: MemoryTools | None = None,
+    tool_adapter: MemoryTools[MemoryCore] | None = None,
     manage_lifecycle: bool = True,
 ) -> Server[MemoryCore]:
     """Create a server for one trusted owner; enforce an optional operation allowlist.
