@@ -30,7 +30,7 @@ class LocalSentenceEmbedder:
         self._model = SentenceTransformer(
             str(path), local_files_only=True, trust_remote_code=False, device="cpu"
         )
-        actual = self._model.get_sentence_embedding_dimension()
+        actual = self._model.get_embedding_dimension()
         if actual != dimensions:
             raise ValueError(
                 f"expected {dimensions} embedding dimensions, got {actual}"
