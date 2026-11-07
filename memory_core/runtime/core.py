@@ -61,7 +61,28 @@ if TYPE_CHECKING:
 
     from memory_core.indexing.semantic import IndexPolicy
     from memory_core.memory.interfaces import DreamPlanner, Embedder, Reconciler
-    from memory_core.memory.models import Nonempty
+    from memory_core.memory.models import (
+        ContextResponse,
+        DescribeSchemaRequest,
+        DreamApplyRequest,
+        DreamPlanRequest,
+        DreamResponse,
+        FieldResponse,
+        FieldsResponse,
+        ListFieldsRequest,
+        ListValuesRequest,
+        Nonempty,
+        PreferencesResponse,
+        PrepareContextRequest,
+        RecallRequest,
+        RecallResponse,
+        RegisterFieldRequest,
+        RememberRequest,
+        RememberResponse,
+        ResolvePreferencesRequest,
+        SchemaResponse,
+        ValuesResponse,
+    )
 
     from .metrics import MemoryMeasurements
     from .models import Finding, RuntimeRequestInput, RuntimeResponse, TaskResponse
@@ -202,6 +223,78 @@ class MemoryCore:
         owner_id: str,
         _transaction_guard: TransactionGuard | None = None,
     ) -> ReviewResponse: ...
+    @overload
+    async def call(
+        self,
+        request: RememberRequest,
+        *,
+        owner_id: str,
+        _transaction_guard: TransactionGuard | None = None,
+    ) -> RememberResponse: ...
+    @overload
+    async def call(
+        self,
+        request: RecallRequest,
+        *,
+        owner_id: str,
+        _transaction_guard: TransactionGuard | None = None,
+    ) -> RecallResponse: ...
+    @overload
+    async def call(
+        self,
+        request: ResolvePreferencesRequest,
+        *,
+        owner_id: str,
+        _transaction_guard: TransactionGuard | None = None,
+    ) -> PreferencesResponse: ...
+    @overload
+    async def call(
+        self,
+        request: PrepareContextRequest,
+        *,
+        owner_id: str,
+        _transaction_guard: TransactionGuard | None = None,
+    ) -> ContextResponse: ...
+    @overload
+    async def call(
+        self,
+        request: DescribeSchemaRequest,
+        *,
+        owner_id: str,
+        _transaction_guard: TransactionGuard | None = None,
+    ) -> SchemaResponse: ...
+    @overload
+    async def call(
+        self,
+        request: ListFieldsRequest,
+        *,
+        owner_id: str,
+        _transaction_guard: TransactionGuard | None = None,
+    ) -> FieldsResponse: ...
+    @overload
+    async def call(
+        self,
+        request: RegisterFieldRequest,
+        *,
+        owner_id: str,
+        _transaction_guard: TransactionGuard | None = None,
+    ) -> FieldResponse: ...
+    @overload
+    async def call(
+        self,
+        request: ListValuesRequest,
+        *,
+        owner_id: str,
+        _transaction_guard: TransactionGuard | None = None,
+    ) -> ValuesResponse: ...
+    @overload
+    async def call(
+        self,
+        request: DreamPlanRequest | DreamApplyRequest,
+        *,
+        owner_id: str,
+        _transaction_guard: TransactionGuard | None = None,
+    ) -> DreamResponse: ...
     @overload
     async def call(
         self,
@@ -549,7 +642,7 @@ class MemoryCore:
         owner_id: str,
         query: str | None = None,
         limit: int = 5,
-    ) -> RuntimeResponse:
+    ) -> ContextResponse:
         from memory_core.memory.models import PrepareContextRequest
 
         return await self.call(
