@@ -26,19 +26,15 @@ fn normalized(v: Vec<f32>, dim: usize, allow_zero: bool) -> Result<Vec<f32>, Str
 const LANES: usize = 8;
 
 fn dot(a: &[f32], b: &[f32]) -> f32 {
-    let (a_chunks, b_chunks) = (a.chunks_exact(LANES), b.chunks_exact(LANES));
-    let tail: f32 = a_chunks
-        .remainder()
-        .iter()
-        .zip(b_chunks.remainder())
-        .map(|(x, y)| x * y)
-        .sum();
+    let (a_lanes, a_tail) = a.as_chunks::<LANES>();
+    let (b_lanes, b_tail) = b.as_chunks::<LANES>();
     let mut lanes = [0.0f32; LANES];
-    for (x, y) in a_chunks.zip(b_chunks) {
-        for i in 0..LANES {
-            lanes[i] += x[i] * y[i];
+    for (x, y) in a_lanes.iter().zip(b_lanes) {
+        for ((lane, x), y) in lanes.iter_mut().zip(x).zip(y) {
+            *lane += x * y;
         }
     }
+    let tail: f32 = a_tail.iter().zip(b_tail).map(|(x, y)| x * y).sum();
     lanes.iter().sum::<f32>() + tail
 }
 

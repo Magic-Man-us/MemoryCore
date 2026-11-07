@@ -104,20 +104,29 @@ async def profile_recall(service, request, repetitions, path):
         tracemalloc.stop()
         instrument_worker_threads(usage, inline=False)
     profiler.dump_stats(path)
-    functions = pstats.Stats(profiler).get_stats_profile().func_profiles
-    hottest = sorted(functions.items(), key=lambda item: -item[1].tottime)
+    # get_stats_profile() keys entries by bare function name, so distinct same-named
+    # functions (e.g. two lambdas) collide, and it rounds times to 1 ms. Stats.stats
+    # keeps (file, line, name) identities and unrounded timings.
+    entries = pstats.Stats(profiler).stats
+    hottest = sorted(entries.items(), key=lambda item: -item[1][2])
     return {
         "stats_file": str(path),
         "queries": repetitions,
         "python_peak_alloc_mib": round(peak / BYTES_PER_MIB, 1),
         "top_functions": [
             {
-                "function": f"{profile.file_name}:{profile.line_number}({name})",
-                "calls": profile.ncalls,
-                "self_ms": round(profile.tottime * 1000, 3),
-                "cumulative_ms": round(profile.cumtime * 1000, 3),
+                "function": f"{file}:{line}({name})",
+                "calls": calls if primitive == calls else f"{calls}/{primitive}",
+                "self_ms": round(self_seconds * 1000, 3),
+                "cumulative_ms": round(cumulative_seconds * 1000, 3),
             }
-            for name, profile in hottest[:TOP_FUNCTIONS]
+            for (file, line, name), (
+                primitive,
+                calls,
+                self_seconds,
+                cumulative_seconds,
+                _callers,
+            ) in hottest[:TOP_FUNCTIONS]
         ],
     }
 
