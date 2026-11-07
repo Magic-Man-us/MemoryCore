@@ -90,6 +90,8 @@ class ClaudeMemoryAgent:
         source = replace(
             original,
             **{
+                # Reflective on purpose: ClaudeAgentOptions is a third-party dataclass whose
+                # fields change across SDK versions; copy every mutable one.
                 field.name: copy(value)
                 for field in fields(original)
                 if isinstance(value := getattr(original, field.name), (dict, list))

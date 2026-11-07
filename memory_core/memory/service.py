@@ -5,14 +5,14 @@ from __future__ import annotations
 import asyncio
 import math
 import secrets
-from datetime import UTC, datetime
 import threading
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from weakref import WeakValueDictionary
 
+from pydantic import BaseModel
 from sqlalchemy import text
-
 
 from memory_core.storage.database import Database
 
@@ -224,7 +224,7 @@ class MemoryService:
         # Revalidate Python instances too: model_copy updates can bypass constructors.
         request = REQUEST_ADAPTER.validate_python(
             request.model_dump(mode="json")
-            if hasattr(request, "model_dump")
+            if isinstance(request, BaseModel)
             else request
         )
         if isinstance(request, RememberRequest):
@@ -348,7 +348,7 @@ class MemoryService:
                     )
                 if self.store.contains(session, owner_id, memory.id):
                     raise ConflictError("memory id already exists")
-                ids = cache.eligible(getattr(memory.scope, "project_id", None))
+                ids = cache.eligible(memory.scope.project_id)
                 neighbors = [
                     MemoryHit(
                         memory=cache.memories[uid].model_copy(deep=True), score=score
@@ -405,7 +405,7 @@ class MemoryService:
                 allowed = {h.memory.id for h in neighbors}
                 # Explicit target operations may address an exact fact outside top-k.
                 if request.decision is not None:
-                    allowed = cache.eligible(getattr(memory.scope, "project_id", None))
+                    allowed = cache.eligible(memory.scope.project_id)
                 stored, new_generation = apply_reconciliation(
                     self, session, owner_id, cache, memory, vector, decision, allowed
                 )

@@ -23,10 +23,12 @@ from memory_core.runtime.context import render_context
 from memory_core.runtime.models import (
     REQUEST_ADAPTER,
     BeginTaskRequest,
+    CompleteTaskRequest,
     KnowledgeResponse,
     PreparedTask,
     PrepareTaskRequest,
     RecordFindingRequest,
+    RequireKnowledgeRequest,
     ResolvedKnowledge,
     TaskRunResult,
 )
@@ -43,6 +45,13 @@ OPERATIONS = frozenset(
         "record_finding",
         "recall",
     }
+)
+
+TASK_BOUND_REQUESTS = (
+    PrepareTaskRequest,
+    RequireKnowledgeRequest,
+    RecordFindingRequest,
+    CompleteTaskRequest,
 )
 
 
@@ -165,7 +174,10 @@ class TaskBinding(MemoryTools):
         request = REQUEST_ADAPTER.validate_python(arguments)
         if request.operation not in OPERATIONS:
             raise SchemaError("operation is unavailable to the task agent")
-        if hasattr(request, "task_id") and request.task_id != self.context.task_id:
+        if (
+            isinstance(request, TASK_BOUND_REQUESTS)
+            and request.task_id != self.context.task_id
+        ):
             raise SchemaError("task identity is bound by the host")
         if (
             isinstance(request, RecallRequest)

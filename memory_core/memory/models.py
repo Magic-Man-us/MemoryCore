@@ -63,6 +63,11 @@ class FieldDefinition(Model):
 class UserScope(Model):
     kind: Literal["user"] = "user"
 
+    @property
+    def project_id(self) -> None:
+        # Uniform with ProjectScope so callers read scope.project_id for either variant.
+        return None
+
 
 class ProjectScope(Model):
     kind: Literal["project"] = "project"

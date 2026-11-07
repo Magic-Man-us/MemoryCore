@@ -6,6 +6,7 @@ import asyncio
 import json
 from datetime import UTC, datetime
 
+from pydantic import BaseModel
 from sqlalchemy import text
 
 from memory_core.memory.errors import ConflictError, ContextRequiredError, SchemaError
@@ -112,7 +113,7 @@ class MemoryCore:
             raise ValueError("authenticated owner must be nonempty")
         request = REQUEST_ADAPTER.validate_python(
             request.model_dump(mode="json")
-            if hasattr(request, "model_dump")
+            if isinstance(request, BaseModel)
             else request
         )
         if isinstance(request, BeginTaskRequest):

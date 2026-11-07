@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Literal
 
-from pydantic import JsonValue, TypeAdapter
+from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from memory_core.memory.models import (
     DECISION_ADAPTER,
@@ -58,7 +58,7 @@ class StructuredReasoner:
         )
         if isinstance(output, str):
             return adapter.validate_json(output)
-        if hasattr(output, "model_dump"):
+        if isinstance(output, BaseModel):
             output = output.model_dump(mode="json")
         return adapter.validate_python(output)
 

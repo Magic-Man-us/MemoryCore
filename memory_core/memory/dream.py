@@ -89,7 +89,7 @@ async def plan(service, owner, request, *, scan=None):
             memory = cache.memories.get(uid)
             if memory is None or memory.status != Status.ACTIVE or not raw:
                 return None
-            ids = cache.eligible(getattr(memory.scope, "project_id", None)) - {uid}
+            ids = cache.eligible(memory.scope.project_id) - {uid}
             hits = cache.search(
                 memory.summary,
                 decode_embedding(raw),
