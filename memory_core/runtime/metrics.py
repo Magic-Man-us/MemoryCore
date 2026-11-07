@@ -1,12 +1,18 @@
 """On-demand local diagnostics. No payloads, telemetry service, or background polling."""
 
+from __future__ import annotations
+
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import Field
 from sqlalchemy import text
 
 from .models import Model
+
+if TYPE_CHECKING:
+    from .core import MemoryCore
 
 
 class MemoryMeasurements(Model):
@@ -26,7 +32,7 @@ class MemoryMeasurements(Model):
     sampled_at: float = Field(default_factory=time.time)
 
 
-def measure(runtime, owner):
+def measure(runtime: MemoryCore, owner: str) -> MemoryMeasurements:
     if not owner:
         raise ValueError("authenticated owner must be nonempty")
     with (
@@ -39,7 +45,9 @@ def measure(runtime, owner):
                 text("""SELECT json_extract(payload,'$.status'),COUNT(*)
             FROM memories_v1 WHERE owner=:o GROUP BY json_extract(payload,'$.status')"""),
                 {"o": owner},
-            ).all()
+            )
+            .tuples()
+            .all()
         )
         jobs = dict(
             session.execute(
@@ -47,7 +55,9 @@ def measure(runtime, owner):
                     "SELECT status,COUNT(*) FROM memory_jobs WHERE owner=:o GROUP BY status"
                 ),
                 {"o": owner},
-            ).all()
+            )
+            .tuples()
+            .all()
         )
         now = time.time()
         oldest = session.execute(
@@ -75,7 +85,7 @@ def measure(runtime, owner):
         filename = runtime.service.store.db.engine.url.database
     path = Path(filename) if filename and filename != ":memory:" else None
 
-    def size(file):
+    def size(file: Path | None) -> int:
         try:
             return file.stat().st_size if file else 0
         except FileNotFoundError:

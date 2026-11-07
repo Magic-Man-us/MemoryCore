@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Self, TypedDict, Unpack, overload
 
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -30,6 +31,8 @@ from .models import (
     ContextContribution,
     ContextInput,
     JobStatus,
+    KnowledgeResponse,
+    KnowledgeResult,
     MaintenancePolicy,
     MaintenanceResponse,
     MaintenanceStatusRequest,
@@ -48,20 +51,46 @@ from .models import (
 from .queue import Queue, canonical
 from .worker import Worker
 
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+    from pathlib import Path
+    from types import TracebackType
+
+    from pydantic import JsonValue
+    from sqlalchemy.orm import Session
+
+    from memory_core.indexing.semantic import IndexPolicy
+    from memory_core.memory.interfaces import DreamPlanner, Embedder, Reconciler
+    from memory_core.memory.models import Nonempty
+
+    from .metrics import MemoryMeasurements
+    from .models import Finding, RuntimeRequestInput, RuntimeResponse, TaskResponse
+    from .providers import ContextResolver, KnowledgeEvaluator, Researcher
+    from .queue import TransactionGuard
+    from .retention import ReclaimReport, RetentionPolicy, RetentionResult
+    from .task import TaskSession
+
+    class RuntimeOptions(TypedDict, total=False):
+        maintenance: MaintenancePolicy | dict[str, JsonValue] | None
+        retention: RetentionPolicy | dict[str, JsonValue] | None
+        researcher: Researcher | None
+        knowledge_evaluator: KnowledgeEvaluator | None
+        context_resolvers: Iterable[ContextResolver]
+
 
 class MemoryCore:
     """Owns lifecycle orchestration around a MemoryService; never infers owner identity."""
 
     def __init__(
         self,
-        service,
+        service: MemoryService,
         *,
-        maintenance=None,
-        retention=None,
-        researcher=None,
-        knowledge_evaluator=None,
-        context_resolvers=(),
-    ):
+        maintenance: MaintenancePolicy | dict[str, JsonValue] | None = None,
+        retention: RetentionPolicy | dict[str, JsonValue] | None = None,
+        researcher: Researcher | None = None,
+        knowledge_evaluator: KnowledgeEvaluator | None = None,
+        context_resolvers: Iterable[ContextResolver] = (),
+    ) -> None:
         from .retention import RetentionPolicy
 
         self.retention = RetentionPolicy.model_validate(retention or RetentionPolicy())
@@ -80,37 +109,114 @@ class MemoryCore:
         service._commit_observer = self.queue.schedule_dream
         self.worker = Worker(self)
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> Self:
         if self.policy.background:
             await self.worker.start()
         return self
 
-    async def __aexit__(self, exc_type, exc, tb):
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
         await self.worker.stop()
         await self.service.checkpoint_indexes(force=True)
 
-    async def maintain(self, *, owner_id):
+    async def maintain(self, *, owner_id: str) -> RetentionResult:
         from .retention import maintain
 
         return await maintain(self, owner_id)
 
-    async def reclaim_storage(self, *, pages=256):
+    async def reclaim_storage(self, *, pages: int = 256) -> ReclaimReport:
         from .retention import reclaim
 
         return await reclaim(self, pages=pages)
 
-    async def measurements(self, *, owner_id):
+    async def measurements(self, *, owner_id: str) -> MemoryMeasurements:
         """Sample owner counts and whole-database disk usage without loading memories."""
         from .metrics import measure
 
         return await asyncio.to_thread(measure, self, owner_id)
 
-    def task(self, *, owner_id, context, objective):
+    def task(
+        self, *, owner_id: str, context: TaskContext, objective: Nonempty
+    ) -> TaskSession:
         from .task import TaskSession
 
         return TaskSession(self, owner_id, context, objective)
 
-    async def call(self, request, *, owner_id, _transaction_guard=None):
+    @overload
+    async def call(
+        self,
+        request: BeginTaskRequest,
+        *,
+        owner_id: str,
+        _transaction_guard: TransactionGuard | None = None,
+    ) -> TaskResponse: ...
+    @overload
+    async def call(
+        self,
+        request: PrepareTaskRequest,
+        *,
+        owner_id: str,
+        _transaction_guard: TransactionGuard | None = None,
+    ) -> PreparedTask: ...
+    @overload
+    async def call(
+        self,
+        request: RequireKnowledgeRequest,
+        *,
+        owner_id: str,
+        _transaction_guard: TransactionGuard | None = None,
+    ) -> KnowledgeResponse: ...
+    @overload
+    async def call(
+        self,
+        request: RecordFindingRequest | CompleteTaskRequest,
+        *,
+        owner_id: str,
+        _transaction_guard: TransactionGuard | None = None,
+    ) -> CaptureResponse: ...
+    @overload
+    async def call(
+        self,
+        request: MaintenanceStatusRequest,
+        *,
+        owner_id: str,
+        _transaction_guard: TransactionGuard | None = None,
+    ) -> MaintenanceResponse: ...
+    @overload
+    async def call(
+        self,
+        request: RetryJobRequest,
+        *,
+        owner_id: str,
+        _transaction_guard: TransactionGuard | None = None,
+    ) -> RetryResponse: ...
+    @overload
+    async def call(
+        self,
+        request: ReviewJobRequest,
+        *,
+        owner_id: str,
+        _transaction_guard: TransactionGuard | None = None,
+    ) -> ReviewResponse: ...
+    @overload
+    async def call(
+        self,
+        request: RuntimeRequestInput,
+        *,
+        owner_id: str,
+        _transaction_guard: TransactionGuard | None = None,
+    ) -> RuntimeResponse: ...
+    async def call(
+        self,
+        request: RuntimeRequestInput,
+        *,
+        owner_id: str,
+        _transaction_guard: TransactionGuard | None = None,
+    ) -> RuntimeResponse:
         if not owner_id:
             raise ValueError("authenticated owner must be nonempty")
         request = REQUEST_ADAPTER.validate_python(
@@ -145,8 +251,8 @@ class MemoryCore:
             )
         return response
 
-    async def _begin(self, request, owner):
-        def existing():
+    async def _begin(self, request: BeginTaskRequest, owner: str) -> TaskResponse:
+        def existing() -> TaskResponse | None:
             with (
                 self.service._owner_lock(owner),
                 self.service.store.read_transaction(owner) as session,
@@ -208,7 +314,7 @@ class MemoryCore:
             attributes=attributes,
         )
 
-        def save():
+        def save() -> TaskResponse:
             with (
                 self.service._owner_lock(owner),
                 self.queue.transaction(owner) as session,
@@ -233,7 +339,13 @@ class MemoryCore:
 
         return await asyncio.to_thread(save)
 
-    def _record(self, request, owner, *, transaction_guard=None):
+    def _record(
+        self,
+        request: RecordFindingRequest | CompleteTaskRequest,
+        owner: str,
+        *,
+        transaction_guard: TransactionGuard | None = None,
+    ) -> CaptureResponse:
         with self.service._owner_lock(owner), self.queue.transaction(owner) as session:
             if transaction_guard is not None:
                 transaction_guard(session)
@@ -294,7 +406,14 @@ class MemoryCore:
             )
             return CaptureResponse(job_ids=jobs)
 
-    def _capture_finding(self, session, owner, task_id, event_id, finding):
+    def _capture_finding(
+        self,
+        session: Session,
+        owner: str,
+        task_id: str,
+        event_id: str,
+        finding: Finding,
+    ) -> str:
         # Use the existing timestamp on replay; event content, not retry time, determines identity.
         old = session.execute(
             text(
@@ -319,8 +438,7 @@ class MemoryCore:
         )
 
     @staticmethod
-    def assert_gaps(session, owner, task_id):
-
+    def assert_gaps(session: Session, owner: str, task_id: str) -> None:
         for row in session.execute(
             text("SELECT gap,result FROM memory_gaps WHERE owner=:o AND task_id=:t"),
             {"o": owner, "t": task_id},
@@ -330,7 +448,9 @@ class MemoryCore:
                     "task has unresolved or expired knowledge gaps"
                 )
 
-    def _status(self, request, owner):
+    def _status(
+        self, request: MaintenanceStatusRequest, owner: str
+    ) -> MaintenanceResponse:
         with (
             self.service._owner_lock(owner),
             self.service.store.read_transaction(owner) as session,
@@ -360,7 +480,7 @@ class MemoryCore:
                 else None,
             )
 
-    def _review(self, request, owner):
+    def _review(self, request: ReviewJobRequest, owner: str) -> ReviewResponse:
         with self.service._owner_lock(owner), self.queue.transaction(owner) as session:
             row = (
                 session.execute(
@@ -400,14 +520,14 @@ class MemoryCore:
             )
             return ReviewResponse(job=self.queue.view(row))
 
-    def _retry(self, request, owner):
+    def _retry(self, request: RetryJobRequest, owner: str) -> RetryResponse:
         with self.service._owner_lock(owner), self.queue.transaction(owner) as session:
             changed = session.execute(
                 text("""UPDATE memory_jobs SET status='pending',
                 attempts=0,available=0,result=NULL,error=NULL,token=NULL,lease_until=NULL
                 WHERE owner=:o AND id=:id AND status IN ('failed','proposed','rejected')"""),
                 {"o": owner, "id": request.job_id},
-            ).rowcount
+            ).rowcount  # pyright: ignore[reportAttributeAccessIssue]  # a DML execute returns a CursorResult
             if not changed:
                 raise ConflictError(
                     "only failed, proposed, or rejected jobs may be retried"
@@ -422,7 +542,14 @@ class MemoryCore:
             )
             return RetryResponse(job=self.queue.view(row))
 
-    async def prepare_task_context(self, context, *, owner_id, query=None, limit=5):
+    async def prepare_task_context(
+        self,
+        context: TaskContext,
+        *,
+        owner_id: str,
+        query: str | None = None,
+        limit: int = 5,
+    ) -> RuntimeResponse:
         from memory_core.memory.models import PrepareContextRequest
 
         return await self.call(
@@ -433,16 +560,16 @@ class MemoryCore:
     @classmethod
     def local(
         cls,
-        path,
+        path: str | Path,
         *,
-        embedding_spec,
-        embedder,
-        reconciler=None,
-        dream_planner=None,
-        max_cached_owners=16,
-        index_policy=None,
-        **kwargs,
-    ):
+        embedding_spec: EmbeddingSpec | dict[str, JsonValue],
+        embedder: Embedder | None,
+        reconciler: Reconciler | None = None,
+        dream_planner: DreamPlanner | None = None,
+        max_cached_owners: int = 16,
+        index_policy: IndexPolicy | dict[str, JsonValue] | None = None,
+        **kwargs: Unpack[RuntimeOptions],
+    ) -> Self:
         """Create a local runtime with optional reasoning/research providers."""
         service = MemoryService(
             Database(path),
@@ -455,8 +582,14 @@ class MemoryCore:
         )
         return cls(service, **kwargs)
 
-    async def _prepare_task(self, request, owner, *, cached=None):
-        def load():
+    async def _prepare_task(
+        self,
+        request: PrepareTaskRequest,
+        owner: str,
+        *,
+        cached: PreparedTask | None = None,
+    ) -> PreparedTask:
+        def load() -> TaskResponse:
             with (
                 self.service._owner_lock(owner),
                 self.service.store.read_transaction(
@@ -484,8 +617,7 @@ class MemoryCore:
                 task.context, owner_id=owner, query=task.objective
             )
 
-        def collect():
-
+        def collect() -> dict[str, KnowledgeResult]:
             with (
                 self.service._owner_lock(owner),
                 self.service.store.read_transaction(

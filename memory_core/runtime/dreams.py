@@ -1,13 +1,25 @@
 """Durable, finite dream scans; continuation and acknowledgement share a transaction."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from sqlalchemy import text
 
 from memory_core.storage.codec import JSON_VALUE
 
 from .models import JobKind
 
+if TYPE_CHECKING:
+    from pydantic import JsonValue
+    from sqlalchemy.orm import Session
 
-def scan_for(queue, claim):
+    from memory_core.memory.models import DreamPlan
+
+    from .queue import Claim, Queue
+
+
+def scan_for(queue: Queue, claim: Claim) -> JsonValue:
     """Pin a high-water mark once, including across retries and process restarts."""
     with (
         queue.service._owner_lock(claim.owner),
@@ -39,7 +51,7 @@ def scan_for(queue, claim):
         return payload["scan"]
 
 
-def advance(queue, session, claim, plan):
+def advance(queue: Queue, session: Session, claim: Claim, plan: DreamPlan) -> None:
     """Advance after application OR review handoff. A retry cannot fork the scan."""
     row = session.execute(
         text("SELECT payload FROM memory_jobs WHERE owner=:o AND id=:id"),

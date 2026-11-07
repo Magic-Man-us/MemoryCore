@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from sqlalchemy import text
@@ -13,6 +14,20 @@ from memory_core.memory.models import TaskContext
 from memory_core.storage.codec import JSON_VALUE, canonical_json
 
 from .models import JobKind, JobStatus, JobView, TaskResponse
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from contextlib import AbstractContextManager
+
+    from pydantic import BaseModel, JsonValue
+    from sqlalchemy import RowMapping
+    from sqlalchemy.orm import Session
+
+    from memory_core.memory.service import MemoryService
+
+    from .models import MaintenancePolicy
+
+    type TransactionGuard = Callable[[Session], None]
 
 DDL = (
     """CREATE TABLE IF NOT EXISTS memory_job_retention (
@@ -41,7 +56,7 @@ DDL = (
 )
 
 
-def canonical(model):
+def canonical(model: BaseModel) -> str:
     return canonical_json(model.model_dump(mode="json"))
 
 
@@ -58,18 +73,18 @@ class Claim:
 
 
 class Queue:
-    def __init__(self, service, policy):
+    def __init__(self, service: MemoryService, policy: MaintenancePolicy) -> None:
         self.service, self.policy = service, policy
         with service.store.db.session_scope() as session:
             for ddl in DDL:
                 session.execute(text(ddl))
             session.commit()
 
-    def transaction(self, owner):
+    def transaction(self, owner: str) -> AbstractContextManager[Session]:
         return self.service.store.transaction(owner)
 
     @staticmethod
-    def task(session, owner, task_id):
+    def task(session: Session, owner: str, task_id: str) -> TaskResponse:
         row = (
             session.execute(
                 text("SELECT * FROM memory_tasks WHERE owner=:o AND id=:id"),
@@ -90,7 +105,13 @@ class Queue:
         )
 
     @staticmethod
-    def enqueue(session, owner, kind, payload, task_id=None):
+    def enqueue(
+        session: Session,
+        owner: str,
+        kind: JobKind,
+        payload: dict[str, JsonValue],
+        task_id: str | None = None,
+    ) -> str:
         job_id = str(uuid4())
         session.execute(
             text("""INSERT INTO memory_jobs(owner,id,task_id,kind,payload,available)
@@ -106,7 +127,14 @@ class Queue:
         )
         return job_id
 
-    def capture(self, session, owner, task_id, event_id, payload):
+    def capture(
+        self,
+        session: Session,
+        owner: str,
+        task_id: str,
+        event_id: str,
+        payload: dict[str, JsonValue],
+    ) -> str:
         raw = canonical_json(payload)
         old = session.execute(
             text("""SELECT payload,job_id FROM memory_events
@@ -137,7 +165,7 @@ class Queue:
         )
         return job_id
 
-    def schedule_dream(self, session, owner):
+    def schedule_dream(self, session: Session, owner: str) -> None:
         state = self.service.store.state(session, owner)
         if state["writes"] - state["dream_writes"] < self.policy.dream_after_writes:
             return
@@ -149,7 +177,7 @@ class Queue:
         if pending is None:
             self.enqueue(session, owner, JobKind.DREAM, {})
 
-    def claim(self, owner=None):
+    def claim(self, owner: str | None = None) -> Claim | None:
         # BEGIN IMMEDIATE serializes claims across processes, including expired leases.
         with self.service.store.db.session_scope() as session:
             session.execute(text("BEGIN IMMEDIATE"))
@@ -209,7 +237,7 @@ class Queue:
             return claim
 
     @staticmethod
-    def assert_lease(session, claim):
+    def assert_lease(session: Session, claim: Claim) -> None:
         found = session.execute(
             text("""SELECT 1 FROM memory_jobs WHERE owner=:o
             AND id=:id AND status='running' AND token=:token AND lease_until>:now"""),
@@ -223,7 +251,14 @@ class Queue:
         if found is None:
             raise ConflictError("maintenance lease expired or was replaced")
 
-    def finish(self, session, claim, status, result=None, error=None):
+    def finish(
+        self,
+        session: Session,
+        claim: Claim,
+        status: JobStatus,
+        result: dict[str, JsonValue] | None = None,
+        error: str | None = None,
+    ) -> None:
         self.assert_lease(session, claim)
         session.execute(
             text("""UPDATE memory_jobs SET status=:s,result=:r,error=:e,
@@ -246,7 +281,7 @@ class Queue:
                 {"o": claim.owner, "id": claim.id, "t": time.time()},
             )
 
-    def fail(self, claim, error):
+    def fail(self, claim: Claim, error: BaseException) -> None:
         with (
             self.service._owner_lock(claim.owner),
             self.transaction(claim.owner) as session,
@@ -272,7 +307,7 @@ class Queue:
             )
 
     @staticmethod
-    def view(row):
+    def view(row: RowMapping) -> JobView:
         return JobView(
             id=row["id"],
             task_id=row["task_id"],

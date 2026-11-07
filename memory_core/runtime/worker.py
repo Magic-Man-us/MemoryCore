@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from typing import TYPE_CHECKING
 
 from sqlalchemy import text
 
@@ -23,15 +24,25 @@ from memory_core.memory.reconciliation import equivalent
 from .dreams import advance, scan_for
 from .models import JobKind, JobResultKind, JobStatus
 
+if TYPE_CHECKING:
+    from pydantic import JsonValue
+    from sqlalchemy.orm import Session
+
+    from memory_core.memory.models import DreamResponse, RememberResponse
+
+    from .core import MemoryCore
+    from .models import TaskResponse
+    from .queue import Claim
+
 
 class ReviewNeeded(Exception):
-    def __init__(self, proposal):
+    def __init__(self, proposal: dict[str, JsonValue]) -> None:
         self.proposal = proposal
         super().__init__("semantic change requires review")
 
 
 class Worker:
-    def __init__(self, runtime):
+    def __init__(self, runtime: MemoryCore) -> None:
         self.runtime = runtime
         self.queue = runtime.queue
         self.service = runtime.service
@@ -42,20 +53,20 @@ class Worker:
         self._retention_after = 0
         self._retention_owner = ""
 
-    async def start(self):
+    async def start(self) -> None:
         if self._runner is None:
             self._stop.clear()
             self._runner = asyncio.create_task(
                 self._loop(), name="memorycore-maintenance"
             )
 
-    async def stop(self):
+    async def stop(self) -> None:
         self._stop.set()
         if self._runner is not None:
             await self._runner  # current job is bounded by job_timeout_seconds
             self._runner = None
 
-    async def _loop(self):
+    async def _loop(self) -> None:
         while not self._stop.is_set():
             try:
                 worked = await self.run_once()
@@ -69,7 +80,7 @@ class Worker:
                 except TimeoutError:
                     pass
 
-    async def run_once(self, *, owner_id=None):
+    async def run_once(self, *, owner_id: str | None = None) -> bool:
         claim = await asyncio.to_thread(self.queue.claim, owner_id)
         if claim is None:
             await self.service.checkpoint_indexes()
@@ -81,7 +92,7 @@ class Worker:
                     time.monotonic() + self.runtime.retention.interval_seconds
                 )
 
-                def next_owner():
+                def next_owner() -> str | None:
                     with (
                         self.service.store.db.session_scope() as session,
                     ):
@@ -117,7 +128,9 @@ class Worker:
             await asyncio.to_thread(self.queue.fail, claim, exc)
         return True
 
-    def _finish(self, claim, status, result):
+    def _finish(
+        self, claim: Claim, status: JobStatus, result: dict[str, JsonValue]
+    ) -> None:
         with (
             self.service._owner_lock(claim.owner),
             self.queue.transaction(claim.owner) as session,
@@ -128,13 +141,17 @@ class Worker:
                     self.queue, session, claim, DreamPlan.model_validate(result["plan"])
                 )
 
-    async def _capture(self, claim):
-        def load_task():
+    async def _capture(self, claim: Claim) -> None:
+        def load_task() -> TaskResponse:
             with (
                 self.service._owner_lock(claim.owner),
                 self.service.store.read_transaction(claim.owner) as session,
             ):
-                return self.queue.task(session, claim.owner, claim.task_id)
+                return self.queue.task(
+                    session,
+                    claim.owner,
+                    claim.task_id,  # pyright: ignore[reportArgumentType]  # capture jobs always carry a task
+                )
 
         task = await asyncio.to_thread(load_task)
         payload = claim.payload
@@ -171,7 +188,7 @@ class Worker:
             expected_generation=approval["generation"] if approval else None,
         )
 
-        def commit(session, response):
+        def commit(session: Session, response: RememberResponse) -> None:
             self.queue.assert_lease(session, claim)
             exact = isinstance(response.decision, AttachEvidence) and any(
                 hit.memory.id == response.decision.target_id
@@ -211,7 +228,7 @@ class Worker:
             request, owner_id=claim.owner, _commit=commit
         )
 
-    async def _dream(self, claim):
+    async def _dream(self, claim: Claim) -> None:
         scan = await asyncio.to_thread(scan_for, self.queue, claim)
         approval = (
             claim.result if claim.result and claim.result.get("approved") else None
@@ -254,7 +271,7 @@ class Worker:
                 )
             plan_id = plan.id
 
-        def commit(session, response):
+        def commit(session: Session, response: DreamResponse) -> None:
             self.queue.finish(
                 session,
                 claim,
@@ -263,7 +280,7 @@ class Worker:
                     "kind": JobResultKind.DREAM_APPLIED,
                     "plan_id": plan_id,
                     "applied": response.plan.applied,
-                    "recommendations": response.plan.proposal.recommendations,
+                    "recommendations": list(response.plan.proposal.recommendations),
                 },
             )
             advance(self.queue, session, claim, response.plan)

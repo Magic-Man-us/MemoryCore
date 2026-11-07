@@ -5,14 +5,28 @@ assert that the user stated a preference: ``explicit`` is trusted provenance, so
 set by host code calling ``MemoryCore.call`` directly, never by a tool call.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from pydantic import BaseModel
 
 from memory_core.memory.models import PreferenceMemory, RememberRequest
 
 from .models import REQUEST_ADAPTER, RESPONSE_ADAPTER
 
+if TYPE_CHECKING:
+    from pydantic import JsonValue
 
-def untrusted(request):
+    from .core import MemoryCore
+    from .models import (
+        JsonSchema,
+        RuntimeRequest,
+        RuntimeRequestInput,
+    )
+
+
+def untrusted(request: RuntimeRequestInput) -> RuntimeRequest:
     """Downgrade claims a tool caller cannot prove. Returns a validated request."""
     request = REQUEST_ADAPTER.validate_python(
         request.model_dump(mode="json") if isinstance(request, BaseModel) else request
@@ -28,24 +42,24 @@ def untrusted(request):
 
 
 class MemoryTools:
-    def __init__(self, memory, *, owner_id):
+    def __init__(self, memory: MemoryCore, *, owner_id: str) -> None:
         if not owner_id:
             raise ValueError("authenticated owner is required")
         self.memory, self.owner_id = memory, owner_id
 
     @property
-    def input_schema(self):
+    def input_schema(self) -> JsonSchema:
         return REQUEST_ADAPTER.json_schema()
 
     @property
-    def output_schema(self):
+    def output_schema(self) -> JsonSchema:
         return RESPONSE_ADAPTER.json_schema()
 
-    def input_schema_for(self, operation, schema):
+    def input_schema_for(self, operation: str, schema: JsonSchema) -> JsonSchema:
         """Allow a scoped adapter to advertise stricter limits it also enforces."""
         return schema
 
-    async def invoke(self, arguments):
+    async def invoke(self, arguments: dict[str, JsonValue]) -> dict[str, JsonValue]:
         response = await self.memory.call(untrusted(arguments), owner_id=self.owner_id)
         return RESPONSE_ADAPTER.validate_python(
             response.model_dump(mode="json")

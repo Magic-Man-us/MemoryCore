@@ -4,10 +4,16 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from memory_core.memory.models import Operation
 
 from .models import REQUEST_ADAPTER, RESPONSE_ADAPTER, RuntimeOperation
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from .models import JsonSchema
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,7 +124,7 @@ SPECS = {
 }
 
 
-def _references(value):
+def _references(value: object) -> Iterator[str]:
     if isinstance(value, dict):
         if "$ref" in value:
             yield value["$ref"].rsplit("/", 1)[-1]
@@ -129,7 +135,7 @@ def _references(value):
             yield from _references(child)
 
 
-def operation_schema(schema, operation):
+def operation_schema(schema: JsonSchema, operation: str) -> JsonSchema:
     """Keep only the selected model's reachable definitions, including recursive filters."""
     reference = schema["discriminator"]["mapping"][operation]
     definitions = schema["$defs"]
@@ -148,7 +154,7 @@ def operation_schema(schema, operation):
     return result
 
 
-def schemas():
+def schemas() -> dict[str, tuple[JsonSchema, JsonSchema]]:
     requests, responses = REQUEST_ADAPTER.json_schema(), RESPONSE_ADAPTER.json_schema()
     if set(requests["discriminator"]["mapping"]) != SPECS.keys():
         raise RuntimeError("every runtime operation must have explicit tool semantics")
