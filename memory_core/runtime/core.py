@@ -63,7 +63,6 @@ if TYPE_CHECKING:
     from memory_core.memory.interfaces import DreamPlanner, Embedder, Reconciler
     from memory_core.memory.models import (
         ContextResponse,
-        DescribeSchemaRequest,
         DreamApplyRequest,
         DreamPlanRequest,
         DreamResponse,
@@ -80,7 +79,6 @@ if TYPE_CHECKING:
         RememberRequest,
         RememberResponse,
         ResolvePreferencesRequest,
-        SchemaResponse,
         ValuesResponse,
     )
 
