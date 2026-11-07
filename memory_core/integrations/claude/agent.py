@@ -274,6 +274,8 @@ class ClaudeMemoryAgent:
                 if acquired:
                     self._slots.release()
                 self._runs.pop(key, None)
+        # The try block either assigns report or raises; cleanup above may amend it.
+        assert report is not None
         return report
 
     async def _execute(self, binding, hooks, options, prompt, on_message):
@@ -319,7 +321,7 @@ class ClaudeMemoryAgent:
         if result is None:
             result = TaskRunResult(
                 outcome=TaskOutcome(
-                    status="failed",
+                    status=OutcomeStatus.FAILED,
                     summary=f"Agent execution did not produce a valid result ({execution_error})",
                 )
             )

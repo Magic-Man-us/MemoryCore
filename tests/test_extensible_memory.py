@@ -930,3 +930,24 @@ def test_validity_window_orders_instants_across_dst_fold():
     memory = observation("fold", valid_from=first, valid_until=second)
     assert memory.valid_until - memory.valid_from == timedelta(hours=1)
     assert memory.valid_from.tzinfo is UTC
+
+
+async def test_corrupt_embedding_cell_hydrates_without_a_vector(service):
+    from memory_core.memory.service import MemoryService
+    from memory_core.storage import Database
+
+    await remember(service, observation("good"))
+    await remember(service, observation("corrupt"))
+    with service.store.db.session_scope() as session:
+        session.execute(
+            text("UPDATE memories_v1 SET embedding=:e WHERE id='corrupt'"),
+            {"e": b"MCV1bad"},
+        )
+        session.commit()
+    fresh = MemoryService(
+        Database(service.store.db.engine.url.database),
+        embedding_spec=SPEC,
+        embedder=LocalEmbedder(),
+    )
+    hits = await recall(fresh)
+    assert [hit.memory.id for hit in hits.hits] == ["good"]

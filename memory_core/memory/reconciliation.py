@@ -111,6 +111,8 @@ def apply_reconciliation(
     )
     now = datetime.now(UTC)
     if isinstance(decision, AttachEvidence):
+        # Every non-Create decision resolved and authorized its target above.
+        assert target is not None
         updated = target.model_copy(
             update={
                 "source_refs": sorted(set(target.source_refs + memory.source_refs)),
@@ -128,6 +130,7 @@ def apply_reconciliation(
         status = (
             Status.SUPERSEDED if isinstance(decision, Supersede) else Status.DISPUTED
         )
+        assert target is not None
         updated = target.model_copy(
             update={
                 "status": status,

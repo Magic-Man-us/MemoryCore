@@ -6,6 +6,8 @@ import asyncio
 from collections import OrderedDict
 from copy import deepcopy
 
+from pydantic import JsonValue
+
 from memory_core.mcpapp import create_server
 from memory_core.memory.errors import (
     ContextBudgetError,
@@ -35,6 +37,8 @@ from memory_core.runtime.models import (
 )
 from memory_core.runtime.tools import MemoryTools
 from memory_core.storage.codec import JSON_VALUE
+
+from .leases import RunLease
 
 # Protocol capabilities, not domain vocabulary. Lifecycle completion/review is host-only.
 OPERATIONS = frozenset(
@@ -67,7 +71,7 @@ class TaskBinding(MemoryTools):
         self._lock = asyncio.Lock()
         self._evidence = OrderedDict()
         self._prepared = None
-        self.lease = None
+        self.lease: RunLease | None = None
 
     async def start(self):
         task = await self.memory.call(
@@ -225,7 +229,7 @@ class TaskBinding(MemoryTools):
         return value
 
     def sdk_server(self):
-        bindings = {
+        bindings: dict[Operation | RuntimeOperation, dict[str, JsonValue]] = {
             name: {"task_id": self.context.task_id}
             for name in (
                 RuntimeOperation.PREPARE_TASK,
@@ -233,8 +237,8 @@ class TaskBinding(MemoryTools):
                 RuntimeOperation.RECORD_FINDING,
             )
         }
-        bindings["recall"] = {"project_id": self.context.project_id}
-        bindings["list_metadata_values"] = {
+        bindings[Operation.RECALL] = {"project_id": self.context.project_id}
+        bindings[Operation.LIST_METADATA_VALUES] = {
             "scope": self.discovery_scope.model_dump(mode="json")
         }
         server = create_server(

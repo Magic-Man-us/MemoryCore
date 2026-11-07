@@ -219,7 +219,8 @@ class PrepareTaskRequest(Model):
 
 
 class PreparedTask(ContextResponse):
-    operation: Literal[RuntimeOperation.PREPARE_TASK] = RuntimeOperation.PREPARE_TASK
+    # A distinct response variant reusing ContextResponse's fields; the tag is meant to differ.
+    operation: Literal[RuntimeOperation.PREPARE_TASK] = RuntimeOperation.PREPARE_TASK  # pyright: ignore[reportIncompatibleVariableOverride]
     context: TaskContext
     objective: Nonempty
     knowledge: dict[str, KnowledgeResult]

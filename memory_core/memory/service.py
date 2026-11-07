@@ -14,7 +14,7 @@ from weakref import WeakValueDictionary
 from pydantic import BaseModel
 from sqlalchemy import text
 
-from memory_core.indexing.semantic import IndexBackend
+from memory_core.indexing.semantic import HnswIndex, IndexBackend
 from memory_core.storage.database import Database
 
 from .cache import OwnerCache
@@ -115,7 +115,7 @@ class MemoryService:
                 self.retrieval_policy,
                 index_policy=self.index_policy,
             )
-            if self.index_policy.backend == IndexBackend.HNSW:
+            if isinstance(cache.vectors, HnswIndex):
                 saved = session.execute(
                     text(
                         "SELECT identity,generation,manifest,graph FROM memory_vector_snapshots WHERE owner=:o"
@@ -134,7 +134,7 @@ class MemoryService:
                         )
         try:
             cache.sync(session, owner, state["generation"])
-            if cache.restored_generation >= 0:
+            if cache.restored_generation >= 0 and isinstance(cache.vectors, HnswIndex):
                 for uid in cache.vectors.active - cache.memories.keys():
                     cache.vectors.remove(uid)
                 cache.restored_generation = -1
@@ -165,7 +165,7 @@ class MemoryService:
                 with self._owner_lock(owner):
                     with self._cache_lock:
                         cache = self._caches.get(owner)
-                    if cache is None:
+                    if cache is None or not isinstance(cache.vectors, HnswIndex):
                         continue
                     if (
                         not force
@@ -178,7 +178,10 @@ class MemoryService:
                     ) as session:
                         cache, _, state = self._snapshot(session, owner)
                         generation = state["generation"]
-                    manifest, graph = cache.vectors.snapshot()
+                    vectors = cache.vectors
+                    if not isinstance(vectors, HnswIndex):
+                        continue
+                    manifest, graph = vectors.snapshot()
                     with self.store.transaction(owner) as session:
                         session.execute(
                             text("""INSERT INTO memory_vector_snapshots VALUES (:o,:i,:g,:m,:b)
@@ -192,7 +195,7 @@ class MemoryService:
                                 "b": graph,
                             },
                         )
-                    cache.vectors.updates = 0
+                    vectors.updates = 0
                     saved += 1
             return saved
 
