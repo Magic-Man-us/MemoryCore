@@ -4,11 +4,11 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from memory_core._native import PyVectorIndex
 from pydantic import ValidationError
 from sqlalchemy import text
 
 from memory_core import Database, EmbeddingSpec, MemoryService
+from memory_core._native import PyVectorIndex
 from memory_core.memory.errors import (
     ConflictError,
     ContextRequiredError,
