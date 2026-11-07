@@ -66,6 +66,8 @@ class HnswIndex:
         self.capacity = 1024
         self.graph = self._new(self.capacity)
         self.updates = 0
+        # Set when a removed vector must not survive into the next snapshot.
+        self.compact = False
         self.last_search = "none"
         self.last_candidates = 0
 
@@ -112,6 +114,13 @@ class HnswIndex:
             self.active.remove(uid)
             self.updates += 1
             return True
+
+    def purge(self, uid: str) -> None:
+        """Remove ``uid`` and drop its stored vector at the next snapshot."""
+        with self.lock:
+            self.remove(uid)
+            if uid in self.labels:
+                self.compact = True
 
     def _exact(
         self, vector: NDArray[np.float32], ids: list[str], k: int
@@ -164,7 +173,9 @@ class HnswIndex:
     def snapshot(self) -> tuple[str, bytes]:
         with self.lock:
             # Rebuild tombstones at checkpoint, not during foreground queries.
-            if len(self.labels) - len(self.active) > max(32, len(self.labels) // 5):
+            if self.compact or len(self.labels) - len(self.active) > max(
+                32, len(self.labels) // 5
+            ):
                 old, mapping = self.graph, self.labels
                 self.capacity = max(1024, len(self.active) * 2)
                 self.graph, self.labels = self._new(self.capacity), {}
@@ -175,6 +186,7 @@ class HnswIndex:
                     labels = list(range(start, start + len(batch)))
                     self.graph.add_items(values, labels)
                     self.labels.update(zip(batch, labels, strict=True))
+                self.compact = False
             self.reverse = {label: uid for uid, label in self.labels.items()}
             with tempfile.TemporaryDirectory() as directory:
                 path = Path(directory) / "index.bin"

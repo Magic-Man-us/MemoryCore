@@ -207,6 +207,14 @@ class MemoryService:
                         continue
                     manifest, graph = vectors.snapshot()
                     with self.store.transaction(owner) as session:
+                        # Saving a graph read before a forget would restore the record.
+                        if session.execute(
+                            text(
+                                "SELECT 1 FROM memory_forgotten WHERE owner=:o AND generation>:g"
+                            ),
+                            {"o": owner, "g": generation},
+                        ).first():
+                            continue
                         session.execute(
                             text("""INSERT INTO memory_vector_snapshots VALUES (:o,:i,:g,:m,:b)
                             ON CONFLICT(owner) DO UPDATE SET identity=excluded.identity,generation=excluded.generation,

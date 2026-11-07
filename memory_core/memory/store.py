@@ -15,7 +15,7 @@ from sqlalchemy import text
 from memory_core.storage.codec import JSON_VALUE
 
 from .metadata import DEFAULT_FIELDS
-from .models import FieldDefinition
+from .models import DreamPlan, FieldDefinition
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -191,7 +191,7 @@ class Store:
                 text(f"SELECT id,payload FROM {table} WHERE owner=:o"), {"o": owner}
             ).all():
                 raw = zlib.decompress(payload) if compressed else payload
-                if _references(JSON_VALUE.validate_json(raw), memory_id):
+                if _embeds(DreamPlan.model_validate_json(raw), memory_id):
                     session.execute(
                         text(f"DELETE FROM {table} WHERE owner=:o AND id=:id"),
                         {"o": owner, "id": plan_id},
@@ -240,11 +240,9 @@ class Store:
         )
 
 
-def _references(value: JsonValue, memory_id: str) -> bool:
-    if isinstance(value, dict):
-        return value.get("id") == memory_id or any(
-            _references(item, memory_id) for item in value.values()
-        )
-    if isinstance(value, list):
-        return any(_references(item, memory_id) for item in value)
-    return False
+def _embeds(plan: DreamPlan, memory_id: str) -> bool:
+    return any(
+        group.memory.id == memory_id
+        or any(hit.memory.id == memory_id for hit in group.neighbors)
+        for group in plan.groups
+    ) or any(change.memory.id == memory_id for change in plan.proposal.changes)
