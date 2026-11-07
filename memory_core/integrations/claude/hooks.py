@@ -3,23 +3,41 @@
 from __future__ import annotations
 
 import asyncio
+from typing import TYPE_CHECKING, cast
 
 from memory_core.memory.errors import MemoryError
 from memory_core.runtime.models import EVIDENCE_ADAPTER
 
 from .binding import OPERATIONS
 
+if TYPE_CHECKING:
+    from claude_agent_sdk.types import (
+        HookContext,
+        HookInput,
+        HookJSONOutput,
+        HookSpecificOutput,
+    )
+
+    from .binding import TaskBinding
+    from .interfaces import EvidenceExtractor
+
 
 class MemoryHooks:
-    def __init__(self, binding, evidence_extractor=None):
+    def __init__(
+        self,
+        binding: TaskBinding,
+        evidence_extractor: EvidenceExtractor | None = None,
+    ) -> None:
         self.binding = binding
         self.extractor = evidence_extractor
-        self.failure = None
+        self.failure: str | None = None
         self.memory_tools = {
             f"mcp__{binding.policy.server_name}__{name}" for name in OPERATIONS
         }
 
-    async def before_tool(self, input, tool_use_id, context):
+    async def before_tool(
+        self, input: HookInput, tool_use_id: str | None, context: HookContext
+    ) -> HookJSONOutput:
         name = input.get("tool_name", "")
         if name in self.memory_tools or name == "StructuredOutput":
             return {}  # Recovery tools must remain callable while a gap is unresolved.
@@ -45,7 +63,9 @@ class MemoryHooks:
                 }
             }
 
-    async def after_tool(self, input, tool_use_id, context):
+    async def after_tool(
+        self, input: HookInput, tool_use_id: str | None, context: HookContext
+    ) -> HookJSONOutput:
         if self.extractor is None or input.get("tool_name") in self.memory_tools | {
             "StructuredOutput"
         }:
@@ -60,13 +80,13 @@ class MemoryHooks:
                 if len(rendered) > self.binding.policy.max_context_chars:
                     raise ValueError("tool evidence exceeded context budget")
                 self.binding.remember_evidence(evidence)
-            return {
-                "hookSpecificOutput": {
-                    "hookEventName": input.get("hook_event_name", "PostToolUse"),
-                    "additionalContext": "Observed evidence available for memory findings: "
-                    + rendered,
-                }
+            output = {
+                "hookEventName": input.get("hook_event_name", "PostToolUse"),
+                "additionalContext": "Observed evidence available for memory findings: "
+                + rendered,
             }
+            # The SDK tags post-tool events as PostToolUse or PostToolUseFailure.
+            return {"hookSpecificOutput": cast("HookSpecificOutput", output)}
         except Exception as exc:  # noqa: BLE001 — executed tools cannot be retroactively denied
             self.failure = type(exc).__name__
             return {

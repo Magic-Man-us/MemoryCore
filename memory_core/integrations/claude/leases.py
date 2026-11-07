@@ -12,6 +12,8 @@ from sqlalchemy import text
 from .models import AgentRunConflict
 
 if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
     from memory_core.runtime.core import MemoryCore
 
 
@@ -22,7 +24,7 @@ class RunLease:
     task_id: str
     token: str
 
-    def check(self, session):
+    def check(self, session: Session) -> None:
         found = session.execute(
             text("""SELECT 1 FROM memory_agent_leases
             WHERE owner=:o AND task_id=:t AND token=:token AND expires>:now"""),
@@ -36,14 +38,14 @@ class RunLease:
         if found is None:
             raise AgentRunConflict("task execution lease expired or was replaced")
 
-    def validate(self):
+    def validate(self) -> None:
         with (
             self.memory.service._owner_lock(self.owner),
             self.memory.service.store.read_transaction(self.owner) as session,
         ):
             self.check(session)
 
-    def release(self):
+    def release(self) -> None:
         with (
             self.memory.service._owner_lock(self.owner),
             self.memory.queue.transaction(self.owner) as session,
@@ -57,7 +59,7 @@ class RunLease:
 
 
 class RunLeases:
-    def __init__(self, memory):
+    def __init__(self, memory: MemoryCore) -> None:
         self.memory = memory
         with memory.service.store.db.session_scope() as session:
             session.execute(
@@ -67,7 +69,7 @@ class RunLeases:
             )
             session.commit()
 
-    def claim(self, owner, task_id, seconds):
+    def claim(self, owner: str, task_id: str, seconds: float) -> RunLease:
         with (
             self.memory.service._owner_lock(owner),
             self.memory.queue.transaction(owner) as session,

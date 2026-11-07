@@ -7,8 +7,8 @@ import statistics
 import time
 
 import numpy as np
-from memory_core._native import PyVectorIndex
 
+from memory_core._native import PyVectorIndex
 from memory_core.indexing.semantic import HnswIndex, IndexPolicy
 
 

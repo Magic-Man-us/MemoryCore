@@ -76,6 +76,9 @@ jobs:
       - name: Type check
         run: uv run --extra dev --extra mcp --extra claude --extra ann pyright
 
+      - name: Lint
+        run: uv run --extra dev --extra mcp --extra claude --extra ann ruff check
+
       - name: Examples
         working-directory: ${{ runner.temp }}
         run: |
