@@ -12,7 +12,7 @@ from memory_core.memory.errors import ConflictError
 from memory_core.memory.models import TaskContext
 from memory_core.storage.codec import JSON_VALUE, canonical_json
 
-from .models import JobView, TaskResponse
+from .models import JobKind, JobStatus, JobView, TaskResponse
 
 DDL = (
     """CREATE TABLE IF NOT EXISTS memory_job_retention (
@@ -130,7 +130,7 @@ class Queue:
         task = self.task(session, owner, task_id)
         if task.outcome is not None:
             raise ConflictError("task is already complete")
-        job_id = self.enqueue(session, owner, "capture", payload, task_id)
+        job_id = self.enqueue(session, owner, JobKind.CAPTURE, payload, task_id)
         session.execute(
             text("INSERT INTO memory_events VALUES (:o,:t,:id,:p,:j)"),
             {"o": owner, "t": task_id, "id": event_id, "p": raw, "j": job_id},
@@ -147,7 +147,7 @@ class Queue:
             {"o": owner},
         ).first()
         if pending is None:
-            self.enqueue(session, owner, "dream", {})
+            self.enqueue(session, owner, JobKind.DREAM, {})
 
     def claim(self, owner=None):
         # BEGIN IMMEDIATE serializes claims across processes, including expired leases.
@@ -238,7 +238,7 @@ class Queue:
                 "e": error,
             },
         )
-        if status == "done":
+        if status == JobStatus.DONE:
             session.execute(
                 text(
                     "INSERT OR IGNORE INTO memory_job_retention(owner,id,completed_at) VALUES (:o,:id,:t)"
@@ -256,7 +256,9 @@ class Queue:
             except ConflictError:
                 return  # A newer worker owns this job; never overwrite its result.
             status = (
-                "failed" if claim.attempts >= self.policy.max_attempts else "pending"
+                JobStatus.FAILED
+                if claim.attempts >= self.policy.max_attempts
+                else JobStatus.PENDING
             )
             self.finish(session, claim, status, error=type(error).__name__)
             session.execute(

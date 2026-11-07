@@ -29,9 +29,11 @@ from .models import (
     CompleteTaskRequest,
     ContextContribution,
     ContextInput,
+    JobStatus,
     MaintenancePolicy,
     MaintenanceResponse,
     MaintenanceStatusRequest,
+    OutcomeStatus,
     PreparedTask,
     PrepareTaskRequest,
     RecordFindingRequest,
@@ -266,7 +268,7 @@ class MemoryCore:
                     .all()
                 )
                 return CaptureResponse(job_ids=list(ids))
-            if request.outcome.status == "succeeded":
+            if request.outcome.status == OutcomeStatus.SUCCEEDED:
                 self.assert_gaps(session, owner, request.task_id)
             jobs = [
                 self._capture_finding(
@@ -368,7 +370,7 @@ class MemoryCore:
                 .mappings()
                 .one_or_none()
             )
-            if row is None or row["status"] != "proposed":
+            if row is None or row["status"] != JobStatus.PROPOSED:
                 raise ConflictError("job is not awaiting review")
             result = JSON_VALUE.validate_json(row["result"])
             if (
@@ -384,7 +386,7 @@ class MemoryCore:
                 {
                     "o": owner,
                     "id": request.job_id,
-                    "s": "pending" if request.accept else "rejected",
+                    "s": JobStatus.PENDING if request.accept else JobStatus.REJECTED,
                     "r": JSON_VALUE.dump_json(result).decode(),
                 },
             )

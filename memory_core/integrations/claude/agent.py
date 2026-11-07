@@ -17,7 +17,12 @@ from claude_agent_sdk import (
 
 from memory_core.memory.models import TaskContext
 from memory_core.runtime.core import MemoryCore
-from memory_core.runtime.models import KnowledgeGap, TaskOutcome, TaskRunResult
+from memory_core.runtime.models import (
+    KnowledgeGap,
+    OutcomeStatus,
+    TaskOutcome,
+    TaskRunResult,
+)
 
 from .binding import OPERATIONS, TaskBinding
 from .hooks import MemoryHooks
@@ -299,7 +304,7 @@ class ClaudeMemoryAgent:
                 execution_error = hooks.failure
             else:
                 validated = binding.validate_result(sdk_result.structured_output)
-                if validated.outcome.status == "succeeded":
+                if validated.outcome.status == OutcomeStatus.SUCCEEDED:
                     await binding.prepare(guard=True)
                 result = validated
         except Exception as exc:  # noqa: BLE001 — distinguish execution failure from capture failure
